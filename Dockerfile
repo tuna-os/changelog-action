@@ -1,4 +1,4 @@
-FROM fedora:latest
+FROM fedora:45
 
 RUN dnf install -y python3 python3-zstandard zstd skopeo git curl && dnf clean all
 
