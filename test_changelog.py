@@ -8,6 +8,7 @@ get_tag_list/get_digest) are monkeypatched — nothing touches a registry.
 """
 
 import importlib.util
+import base64
 import json
 import re
 import sys
@@ -177,6 +178,104 @@ class TestExtractPayloads:
 
     def test_no_payloads(self):
         assert _mod.extract_payloads("nothing here") == []
+
+
+# ── registry and SBOM retrieval ───────────────────────────────────────
+
+class TestRegistryRetrieval:
+    def test_fetch_manifest_uses_skopeo_inspect(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: calls.append(cmd) or '{"RepoTags": ["v1"]}')
+        assert _mod.fetch_manifest("ghcr.io/acme/", "image", "v1") == {"RepoTags": ["v1"]}
+        assert calls == [["skopeo", "inspect", "docker://ghcr.io/acme/image:v1"]]
+
+    def test_get_digest_selects_linux_amd64_from_index(self, monkeypatch):
+        manifest = {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [
+                {"digest": "sha256:arm", "platform": {"architecture": "arm64", "os": "linux"}},
+                {"digest": "sha256:amd", "platform": {"architecture": "amd64", "os": "linux"}},
+            ],
+        }
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: json.dumps(manifest))
+        assert _mod.get_digest("ghcr.io/acme/", "image", "v1") == "sha256:amd"
+
+    def test_get_digest_rejects_index_without_linux_amd64(self, monkeypatch):
+        manifest = {
+            "mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+            "manifests": [{"digest": "sha256:arm", "platform": {"architecture": "arm64", "os": "linux"}}],
+        }
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: json.dumps(manifest))
+        with pytest.raises(ValueError, match="Could not find amd64 linux manifest"):
+            _mod.get_digest("ghcr.io/acme/", "image", "v1")
+
+    def test_get_digest_falls_back_to_inspect_for_single_manifest(self, monkeypatch):
+        outputs = iter(['{"schemaVersion": 2}', '{"Digest": "sha256:single"}'])
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: next(outputs))
+        assert _mod.get_digest("ghcr.io/acme/", "image", "v1") == "sha256:single"
+
+    def test_fetch_sbom_decodes_spdx_predicate(self, monkeypatch):
+        document = {"predicate": {"packages": [{"name": "bash"}]}}
+        payload = base64.b64encode(json.dumps(document).encode()).decode()
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: json.dumps({"payload": payload}))
+        assert _mod.fetch_sbom("ghcr.io/acme/", "key", "image", "sha256:x") == document["predicate"]
+
+    def test_fetch_sbom_falls_back_to_lts_attestation(self, monkeypatch):
+        calls = []
+        document = {"predicate": {"artifacts": [{"name": "bash"}]}}
+        payload = base64.b64encode(json.dumps(document).encode()).decode()
+
+        def fake_run(cmd):
+            calls.append(cmd)
+            if "spdxjson" in cmd:
+                raise RuntimeError("missing stable attestation")
+            return json.dumps({"payload": payload})
+
+        monkeypatch.setattr(_mod, "run_cmd", fake_run)
+        assert _mod.fetch_sbom("ghcr.io/acme/", "key", "image", "sha256:x") == document["predicate"]
+        assert "urn:ublue-os:attestation:spdx+json+zstd:v1" in calls[1]
+
+
+class TestReleaseAssembly:
+    def test_fetch_packages_prefers_oras(self, monkeypatch):
+        monkeypatch.setattr(_mod, "get_digest", lambda *args: "sha256:x")
+        monkeypatch.setattr(_mod, "fetch_sbom_oras", lambda *args: {
+            "artifacts": [{"type": "rpm", "name": "bash", "version": "1:5.2-1.fc45"}]
+        })
+        monkeypatch.setattr(_mod, "fetch_sbom", lambda *args: pytest.fail("cosign fallback should not run"))
+        assert _mod.fetch_packages("registry/", "key", "image", "v1") == {"bash": "5.2-1"}
+
+    def test_fetch_packages_falls_back_to_cosign(self, monkeypatch):
+        monkeypatch.setattr(_mod, "get_digest", lambda *args: "sha256:x")
+        monkeypatch.setattr(_mod, "fetch_sbom_oras", lambda *args: (_ for _ in ()).throw(ValueError("no referrer")))
+        monkeypatch.setattr(_mod, "fetch_sbom", lambda *args: {
+            "artifacts": [{"type": "rpm", "name": "coreutils", "version": "9.5-1.fc45"}]
+        })
+        assert _mod.fetch_packages("registry/", "key", "image", "v1") == {"coreutils": "9.5-1"}
+
+    def test_build_release_collects_each_image(self, monkeypatch):
+        monkeypatch.setattr(_mod, "fetch_packages", lambda registry, key, image, tag: {image: tag})
+        release = _mod.build_release("registry/", "key", ["one", "two"], "v2")
+        assert release == {
+            "one": {"packages": {"one": "v2"}},
+            "two": {"packages": {"two": "v2"}},
+        }
+
+    def test_build_release_data_explicit_configuration(self, monkeypatch):
+        monkeypatch.setattr(_mod, "build_release", lambda registry, key, images, tag: {
+            images[0]: {"packages": {"bash": tag}}
+        })
+        monkeypatch.setattr(_mod, "fetch_commits", lambda prev, curr: [{"hash": "abc"}])
+        data = _mod.build_release_data(
+            "v1", "v2", images=["image"], registry="registry/", cosign_key="key"
+        )
+        assert data["family"] == "registry/"
+        assert data["diff"]["image"]["changed"]["bash"] == {"from": "v1", "to": "v2"}
+        assert data["website"]["image"] == {"featured": {}}
+
+    def test_explicit_configuration_requires_images(self):
+        with pytest.raises(ValueError, match="--images must be provided"):
+            _mod.build_release_data("v1", "v2", registry="registry/", cosign_key="key")
 
 
 # ── infer_variant_label ──────────────────────────────────────────────────────
