@@ -2,21 +2,41 @@ FROM fedora:45
 
 RUN dnf install -y python3 python3-zstandard zstd skopeo git curl && dnf clean all
 
-# Install Cosign
-RUN curl -L "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64" -o /usr/local/bin/cosign && \
-    chmod +x /usr/local/bin/cosign
+# Install Cosign.
+#
+# Pinned and checksum-verified. changelog.py's whole job is to run
+# `cosign verify-attestation` and trust its exit status, so a cosign binary
+# fetched from `latest/download` with no integrity check would make every
+# verification in this action worth exactly nothing — and a subverted verifier
+# fails silently, by design.
+#
+# Both tools are verified against the checksum file their own release
+# publishes, so bumping the version below is the only maintenance step; there
+# is no locally maintained digest to keep in sync. Renovate understands these
+# ARG pins.
+ARG COSIGN_VERSION=3.1.3
+RUN set -eux; \
+    cd /tmp; \
+    curl -fsSLO "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"; \
+    curl -fsSLO "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign_checksums.txt"; \
+    sha256sum --check --ignore-missing cosign_checksums.txt; \
+    install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign; \
+    rm -f cosign-linux-amd64 cosign_checksums.txt
 
-# Install ORAS (for fetching SBOMs stored as OCI referrers via oras attach)
-RUN curl -sL "https://api.github.com/repos/oras-project/oras/releases/latest" \
-      | python3 -c "import sys,json; v=json.load(sys.stdin)['tag_name'][1:]; print(v)" \
-      > /tmp/oras_version && \
-    ORAS_VERSION="$(cat /tmp/oras_version)" && \
-    curl -L "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-      -o /tmp/oras.tar.gz && \
-    tar -xzf /tmp/oras.tar.gz -C /tmp && \
-    mv /tmp/oras /usr/local/bin/oras && \
-    chmod +x /usr/local/bin/oras && \
-    rm -f /tmp/oras.tar.gz /tmp/oras_version
+# Install ORAS (for fetching SBOMs stored as OCI referrers via oras attach).
+#
+# Same treatment. This previously resolved the version from the GitHub API at
+# build time and extracted the tarball unverified, so the binary that fetches
+# every SBOM blob was whatever the network handed over.
+ARG ORAS_VERSION=1.3.3
+RUN set -eux; \
+    cd /tmp; \
+    curl -fsSLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"; \
+    curl -fsSLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_checksums.txt"; \
+    sha256sum --check --ignore-missing "oras_${ORAS_VERSION}_checksums.txt"; \
+    tar -xzf "oras_${ORAS_VERSION}_linux_amd64.tar.gz" oras; \
+    install -m 0755 oras /usr/local/bin/oras; \
+    rm -f oras "oras_${ORAS_VERSION}_linux_amd64.tar.gz" "oras_${ORAS_VERSION}_checksums.txt"
 
 COPY changelog.py /changelog.py
 RUN chmod +x /changelog.py
