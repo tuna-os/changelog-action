@@ -47,7 +47,7 @@ inputs:
 
 runs:
   using: 'docker'
-  image: 'docker://ghcr.io/hanthor/changelog-action:latest'
+  image: 'Dockerfile'
   args:
     - ${{ inputs.family && '--family' || '' }}
     - ${{ inputs.family }}

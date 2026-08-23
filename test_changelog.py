@@ -21,6 +21,14 @@ _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
+def test_action_runs_the_pinned_repository_source():
+    """The selected action ref, not an external mutable image, defines runtime."""
+    metadata = (_SCRIPT.parent / "action.yml").read_text()
+    assert "image: 'Dockerfile'" in metadata
+    assert "docker://" not in metadata
+    assert "ghcr.io/hanthor" not in metadata
+
+
 # ── normalize_version ────────────────────────────────────────────────────────
 
 class TestNormalizeVersion:
