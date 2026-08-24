@@ -32,8 +32,9 @@ It supports both explicit tag comparison and automatic tag discovery based on a 
 | `cosign-key` | URL or path to cosign public key | Yes* | |
 | `images` | Space-separated list of image names (e.g. `bonito skipjack`) | Yes* | |
 | `stream` | Release stream for auto-discovery (e.g. `stable`, `latest`) | No | |
-| `prev-tag` | Previous release tag (ignored if `stream` is set) | No | |
-| `curr-tag` | Current release tag (ignored if `stream` is set) | No | |
+| `tag-pattern` | Override regex pattern for tag discovery (e.g. `^\d{8}$` for date tags; only used when `stream` is set) | No | |
+| `prev_tag` | Previous release tag (ignored if `stream` is set) | No | |
+| `curr_tag` | Current release tag (ignored if `stream` is set) | No | |
 | `handwritten` | Optional introductory text for the changelog | No | |
 | `output` | Output file path | No | `changelog.md` |
 | `output-env` | Output environment file path (TITLE=... TAG=...) | No | |
