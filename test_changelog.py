@@ -10,6 +10,7 @@ get_tag_list/get_digest) are monkeypatched — nothing touches a registry.
 import importlib.util
 import base64
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -234,6 +235,69 @@ class TestRegistryRetrieval:
         monkeypatch.setattr(_mod, "run_cmd", fake_run)
         assert _mod.fetch_sbom("ghcr.io/acme/", "key", "image", "sha256:x") == document["predicate"]
         assert "urn:ublue-os:attestation:spdx+json+zstd:v1" in calls[1]
+
+
+class TestFetchSbomOras:
+    """fetch_sbom_oras (`oras discover` + `oras pull`) had zero direct
+    coverage — only ever exercised indirectly through a monkeypatched stub
+    in TestReleaseAssembly. Its own referrer-selection and error paths were
+    never actually run.
+    """
+
+    def test_fetches_and_parses_json_via_oras_pull(self, monkeypatch):
+        document = {"packages": [{"name": "bash"}]}
+
+        def fake_run(cmd):
+            if cmd[1] == "discover":
+                return json.dumps({"referrers": [{"digest": "sha256:ref1"}]})
+            if cmd[1] == "pull":
+                out_dir = cmd[cmd.index("--output") + 1]
+                with open(os.path.join(out_dir, "sbom.spdx.json"), "w") as fh:
+                    json.dump(document, fh)
+                return ""
+            raise AssertionError(f"unexpected oras subcommand: {cmd}")
+
+        monkeypatch.setattr(_mod, "run_cmd", fake_run)
+        assert _mod.fetch_sbom_oras("ghcr.io/acme/", "image", "sha256:x") == document
+
+    def test_uses_most_recent_referrer_when_multiple(self, monkeypatch):
+        document = {"ok": True}
+
+        def fake_run(cmd):
+            if cmd[1] == "discover":
+                return json.dumps(
+                    {"referrers": [{"digest": "sha256:old"}, {"digest": "sha256:new"}]}
+                )
+            if cmd[1] == "pull":
+                assert cmd[-1].endswith("sha256:new"), cmd
+                out_dir = cmd[cmd.index("--output") + 1]
+                with open(os.path.join(out_dir, "sbom.json"), "w") as fh:
+                    json.dump(document, fh)
+                return ""
+            raise AssertionError(f"unexpected oras subcommand: {cmd}")
+
+        monkeypatch.setattr(_mod, "run_cmd", fake_run)
+        assert _mod.fetch_sbom_oras("ghcr.io/acme/", "image", "sha256:x") == document
+
+    def test_raises_when_no_referrers_found(self, monkeypatch):
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: json.dumps({"referrers": []}))
+        with pytest.raises(ValueError, match="No ORAS SBOM referrers"):
+            _mod.fetch_sbom_oras("ghcr.io/acme/", "image", "sha256:x")
+
+    def test_raises_when_referrer_has_no_digest(self, monkeypatch):
+        monkeypatch.setattr(_mod, "run_cmd", lambda cmd: json.dumps({"referrers": [{}]}))
+        with pytest.raises(ValueError, match="no digest"):
+            _mod.fetch_sbom_oras("ghcr.io/acme/", "image", "sha256:x")
+
+    def test_raises_when_pull_yields_no_json_file(self, monkeypatch):
+        def fake_run(cmd):
+            if cmd[1] == "discover":
+                return json.dumps({"referrers": [{"digest": "sha256:ref1"}]})
+            return ""  # pull "succeeds" but writes nothing usable
+
+        monkeypatch.setattr(_mod, "run_cmd", fake_run)
+        with pytest.raises(ValueError, match="No JSON file found"):
+            _mod.fetch_sbom_oras("ghcr.io/acme/", "image", "sha256:x")
 
 
 class TestReleaseAssembly:
