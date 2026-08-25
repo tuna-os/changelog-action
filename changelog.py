@@ -19,22 +19,22 @@ from typing import Callable, Any
 IMAGE_CONFIGS = {
     "bluefin": {
         "registry": "ghcr.io/ublue-os/",
-        "cosign_key": "https://raw.githubusercontent.com/ublue-os/bluefin/refs/heads/main/cosign.pub",
+        "cosign_key": "https://raw.githubusercontent.com/ublue-os/bluefin/2d50cf0f45d4/cosign.pub",
         "images": ["bluefin", "bluefin-dx"],
     },
     "aurora": {
         "registry": "ghcr.io/ublue-os/",
-        "cosign_key": "https://raw.githubusercontent.com/ublue-os/aurora/refs/heads/main/cosign.pub",
+        "cosign_key": "https://raw.githubusercontent.com/ublue-os/aurora/2d50cf0f45d4/cosign.pub",
         "images": ["aurora", "aurora-dx"],
     },
     "bluefin-lts": {
         "registry": "ghcr.io/ublue-os/",
-        "cosign_key": "https://raw.githubusercontent.com/ublue-os/bluefin-lts/refs/heads/main/cosign.pub",
+        "cosign_key": "https://raw.githubusercontent.com/ublue-os/bluefin-lts/a5b68cebd447/cosign.pub",
         "images": ["bluefin", "bluefin-dx"],
     },
     "aurora-lts": {
         "registry": "ghcr.io/ublue-os/",
-        "cosign_key": "https://raw.githubusercontent.com/ublue-os/aurora-lts/refs/heads/main/cosign.pub",
+        "cosign_key": "https://raw.githubusercontent.com/ublue-os/aurora-lts/955f986183fd/cosign.pub",
         "images": ["aurora", "aurora-dx"],
     },
 }

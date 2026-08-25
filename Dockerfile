@@ -1,4 +1,7 @@
-FROM fedora:45
+# Base is digest-pinned (tuna-os/tunaOS#1992): a mutable fedora:45 tag
+# would let a retargeted tag change what every changelog verification runs
+# inside, without any review here.
+FROM fedora@sha256:ea5726b9c7d8f7c5a7826f196b93adc4e2e2bb6b0c707f3857104642bf34b4f3
 
 RUN dnf install -y python3 python3-zstandard zstd skopeo git curl && dnf clean all
 
