@@ -437,3 +437,47 @@ class TestFeatured:
         assert set(featured) <= set(packages)
         data = _mod.build_website_data({"img": {"packages": packages}})
         assert set(data["img"]["featured"]) == set(featured)
+
+
+# ── main CLI ─────────────────────────────────────────────────────────────────
+
+class TestMainCLI:
+    def test_main_writes_markdown_and_output_env(self, monkeypatch, tmp_path):
+        out_md = tmp_path / "changelog.md"
+        out_env = tmp_path / "out.env"
+        argv = [
+            "changelog.py",
+            "stable-20250101",
+            "stable-20250102",
+            "--registry", "ghcr.io/tuna-os/",
+            "--cosign-key", "key.pub",
+            "--images", "img1",
+            "-o", str(out_md),
+            "--output-env", str(out_env),
+            "--handwritten", "Manual notes",
+        ]
+        monkeypatch.setattr(sys, "argv", argv)
+        fake_data = {
+            "family": "ghcr.io/tuna-os/",
+            "prev-tag": "stable-20250101",
+            "curr-tag": "stable-20250102",
+            "images": ["img1"],
+            "releases": {"previous": {}, "current": {}},
+            "common-packages": [],
+            "diff": {"img1": {"added": {}, "removed": {}, "changed": {}}},
+            "commits": [],
+            "website": {},
+        }
+        monkeypatch.setattr(_mod, "build_release_data", lambda **k: fake_data)
+
+        _mod.main()
+
+        assert out_md.exists()
+        md_text = out_md.read_text()
+        assert "Manual notes" in md_text
+        assert "stable-20250102" in md_text
+
+        assert out_env.exists()
+        env_text = out_env.read_text()
+        assert 'TITLE="stable-20250102: Stable Release"' in env_text
+        assert "TAG=stable-20250102" in env_text
