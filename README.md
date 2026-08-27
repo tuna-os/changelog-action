@@ -40,3 +40,7 @@ It supports both explicit tag comparison and automatic tag discovery based on a 
 | `output-env` | Output environment file path (TITLE=... TAG=...) | No | |
 | `json` | Output JSON instead of Markdown | No | `false` |
 | `verbose` | Enable debug logging | No | `false` |
+
+## Development & Testing
+
+For local test execution commands and contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
