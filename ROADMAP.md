@@ -1,6 +1,6 @@
 # changelog-action Roadmap
 
-**Last updated**: 2026-08-24 | **Maintainer**: tuna-os (hanthor)
+**Last updated**: 2026-08-29 | **Maintainer**: tuna-os (hanthor)
 
 ---
 
@@ -15,23 +15,27 @@ not guessed.
 
 ## Current Status
 
-- **Role**: composite GitHub Action consumed org-wide via
-  `uses: tuna-os/changelog-action@master`.
+- **Role**: candidate organization GitHub Action for verified container-image
+  changelogs. No production consumer is currently visible in the tuna-os
+  organization.
 - **Distribution**: **unversioned** — no tags, no releases; consumers pin to
-  the mutable `master` branch.
-- **Trust**: action itself verifies cosign attestations, but its cosign/oras
-  install is unpinned from 'latest' with no checksum (sec-check #14,
-  supersedes #1992).
-- **Health**: 3 open issues — pinned cosign/oras install (#14), tag-pattern
-  input docs (#12/#13).
+  the mutable `master` branch if they follow the README.
+- **Trust**: the action verifies cosign attestations; dependency trust-anchor
+  pinning landed in PR #14.
+- **Validation**: GitHub reports zero Actions runs in this repository, so no
+  end-to-end execution of the org fork is recorded.
+- **Ownership**: this repository remains a fork of
+  `hanthor/changelog-action`; the adopt-versus-retire decision is tracked in
+  tuna-os/tunaOS#2167 because Issues are disabled in this repository.
 
 ### Priorities
 
 | Priority | Item | Tracking | Status |
 |----------|------|----------|--------|
-| P0 | First tagged release (v1.x) + consumers pin to tag | (new) | ⬜ Not started |
-| P1 | Pin cosign/oras install to checksummed versions | #14 | 🟡 Open |
-| P2 | tag-pattern input documented | #12/#13 | 🟡 Open |
+| P0 | Decide adopt versus retire; name an owning repository | tuna-os/tunaOS#2167 | ⬜ Not started |
+| P0 | If adopted: one green production run, then v1.x + immutable consumer pin | tuna-os/tunaOS#2167 | ⬜ Not started |
+| P1 | Pin cosign/oras trust anchors | PR #14 | ✅ Done |
+| P2 | Document tag-pattern and correct input names | PR #13 | ✅ Done |
 | P2 | ROADMAP-coverage entry in org ROADMAP tally | #1295 | ⬜ Not started |
 
 ---
@@ -40,12 +44,14 @@ not guessed.
 
 ### Current Quarter (2026 Q3)
 
-**Theme**: version the verifier
+**Theme**: prove the verifier has an owner and a consumer
 
 | Goal | Owner | Tracking | Status |
 |------|-------|----------|--------|
-| Cut v1.x tag; update consumers from `@master` | hanthor | (new) | ⬜ Not started |
-| Pin cosign/oras install | hanthor | #14 | ⬜ Not started |
+| Choose adopt or retire by 2026-09-15 | hanthor | tuna-os/tunaOS#2167 | ⬜ Not started |
+| If adopted, complete one green production execution | hanthor | tuna-os/tunaOS#2167 | ⬜ Not started |
+| After the green run, cut v1.x and migrate the named consumer | hanthor | tuna-os/tunaOS#2167 | ⬜ Not started |
+| Pin cosign/oras trust anchors | hanthor | PR #14 | ✅ Done |
 
 ### Next Quarter (2026 Q4)
 
@@ -53,7 +59,8 @@ not guessed.
 
 | Goal | Owner | Tracking | Status |
 |------|-------|----------|--------|
-| Release cadence aligned with org | tuna-os | (new) | ⬜ Not started |
+| If adopted, publish a release-currency SLO and owner | tuna-os | tuna-os/tunaOS#2167 | ⬜ Not started |
+| If retired, archive the fork and document the supported replacement | tuna-os | tuna-os/tunaOS#2167 | ⬜ Not started |
 
 ---
 
