@@ -437,3 +437,37 @@ class TestFeatured:
         assert set(featured) <= set(packages)
         data = _mod.build_website_data({"img": {"packages": packages}})
         assert set(data["img"]["featured"]) == set(featured)
+
+
+# ── parse_args & CLI argument validation ─────────────────────────────────────
+
+class TestParseArgs:
+    def test_parse_args_with_positional_tags(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["changelog.py", "v1", "v2", "--family", "bluefin"])
+        args = _mod.parse_args()
+        assert args.prev_tag == "v1"
+        assert args.curr_tag == "v2"
+        assert args.family == "bluefin"
+
+    def test_parse_args_with_stream_and_custom_options(self, monkeypatch):
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "changelog.py",
+                "--stream", "stable",
+                "--registry", "ghcr.io/tuna-os/",
+                "--cosign-key", "https://example.com/key.pub",
+                "--images", "yellowfin", "albacore",
+                "--tag-pattern", r"^stable-\d{8}$",
+                "--json",
+            ],
+        )
+        args = _mod.parse_args()
+        assert args.stream == "stable"
+        assert args.registry == "ghcr.io/tuna-os/"
+        assert args.cosign_key == "https://example.com/key.pub"
+        assert args.images == ["yellowfin", "albacore"]
+        assert args.tag_pattern == r"^stable-\d{8}$"
+        assert args.json is True
+
