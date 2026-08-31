@@ -10,10 +10,18 @@ The action core (`changelog.py`) is written in Python 3. Unit tests are located 
 
 Unit tests use `pytest` with network and CLI seams monkeypatched (no live container registry requests or external binary executions required).
 
-Run the test suite using `python3`:
+Before running the tests, install these prerequisites:
+
+- Python 3 with the `venv` module
+- Network access to [PyPI](https://pypi.org/project/pytest/) to install `pytest`
+
+From the repository root, create an isolated environment, install `pytest`,
+and run the test suite:
 
 ```bash
-python3 -m pytest
+python3 -m venv .venv
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest
 ```
 
 ### Local Testing of `changelog.py` CLI
@@ -34,7 +42,7 @@ python3 changelog.py --verbose --help
 
 1. Ensure all unit tests pass prior to submitting your PR:
    ```bash
-   python3 -m pytest
+   .venv/bin/python -m pytest
    ```
 2. Follow Conventional Commits format for commit messages (e.g. `docs: ...`, `fix: ...`, `feat: ...`).
 3. Always sign your commits using DCO (`git commit -s`).
