@@ -6,7 +6,7 @@ name: test
 # a safety net, it is a file.
 on:
   push:
-    branches: [master, main]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
