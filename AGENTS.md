@@ -17,8 +17,9 @@ what a default means, breaks every workflow that calls it.
 
 Two facts make that sharper than usual:
 
-- **The default branch is `master`**, not `main`. Branch from it, target it.
-- **There are no release tags**, so callers pin `@master` (the README says so).
+- **The default branch is `main`**, renamed from `master`. GitHub does not
+  keep the old ref alive, so anything still pinning `@master` is broken.
+- **There are no release tags**, so callers pin `@main` (the README says so).
   Every consumer therefore tracks this branch's tip: a change is live for them
   the moment it merges, with no version to hold them back and no way to roll
   back except another commit. Cutting a `v1` tag would fix that; until then,
@@ -30,22 +31,22 @@ Two facts make that sharper than usual:
 |---|---|
 | `action.yml` | the input contract |
 | `changelog.py` | the implementation (~750 lines) |
-| `test_changelog.py` | the suite — 42 tests |
+| `test_changelog.py` | the suite — 50 tests |
 | `Dockerfile` | the action's runtime |
 
 ```bash
-python3 -m pytest test_changelog.py -q   # 42 passed
+python3 -m pytest test_changelog.py -q   # 50 passed
 ruff check .                             # config in ruff.toml
 ```
 
 > **`ruff` is configured but not enforced.** `ruff.toml` sets the rules and
 > `test.yml` runs *only* pytest, so nothing checks them and the tree has
-> drifted: `ruff check .` reports 18 findings on `master`.
+> drifted: `ruff check .` reports 15 findings on `main`.
 >
-> They are style, not defects — I checked the two that can indicate real bugs.
-> `F811` is a redundant `import sys` inside `main()` shadowing the module-level
-> import, and `F841` is an unused `cmd` variable in a test. Neither changes
-> behaviour. The rest are import ordering, unused imports and long lines.
+> They are style, not defects — the only one that can indicate a real bug is
+> `F841`, an unused `cmd` variable in a test, which changes no behaviour. The
+> rest are import ordering, unused imports and long lines. (An `F811`
+> redundant `import sys` was here too and has since been fixed.)
 
 ## External tools it shells out to
 
