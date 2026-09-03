@@ -19,7 +19,7 @@ not guessed.
   changelogs. No production consumer is currently visible in the tuna-os
   organization.
 - **Distribution**: **unversioned** — no tags, no releases; consumers pin to
-  the mutable `main` branch if they follow the README.
+  the mutable default branch if they follow the README.
 - **Trust**: the action verifies cosign attestations; dependency trust-anchor
   pinning landed in PR #14.
 - **Validation**: GitHub reports zero Actions runs in this repository, so no
