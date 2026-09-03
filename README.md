@@ -8,7 +8,7 @@ It supports both explicit tag comparison and automatic tag discovery based on a 
 
 ```yaml
 - name: Generate Changelog
-  uses: tuna-os/changelog-action@main
+  uses: tuna-os/changelog-action@master
   with:
     registry: ghcr.io/tuna-os/
     cosign-key: https://raw.githubusercontent.com/tuna-os/tunaos/main/cosign.pub
@@ -17,14 +17,15 @@ It supports both explicit tag comparison and automatic tag discovery based on a 
     output: changelog.md
 ```
 
-> The org repo has no release tags, so `@main` pins a moving branch — every
-> merge here is live for consumers immediately, with no version to hold them
-> back. The maintainers should cut a `v1` tag (the README previously
-> referenced `hanthor/changelog-action@v1`, a personal repo, and `@v1` does
-> not exist on `tuna-os/changelog-action`).
+> The org repo has no release tags, so this pins a moving branch — every merge
+> here is live for consumers immediately, with no version to hold them back.
+> The maintainers should cut a `v1` tag (the README previously referenced
+> `hanthor/changelog-action@v1`, a personal repo, and `@v1` does not exist on
+> `tuna-os/changelog-action`).
 >
-> The default branch was renamed from `master` to `main`; GitHub does not keep
-> the old ref, so any workflow still pinning `@master` must be updated.
+> The default branch is being renamed `master` -> `main`. **Change this to
+> `@main` once that has happened** — GitHub does not keep the old ref alive
+> after a rename, so `@master` stops resolving at that moment.
 
 ## Inputs
 

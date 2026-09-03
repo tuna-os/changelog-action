@@ -2,7 +2,9 @@ name: Build and Push Action Image
 
 on:
   push:
-    branches: ['main']
+    # Both names until the default branch is renamed master -> main; drop
+    # 'master' once that has happened.
+    branches: ['main', 'master']
     paths:
       - 'Dockerfile'
       - 'changelog.py'
@@ -35,7 +37,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
             type=sha
 
       - name: Build and push Docker image

@@ -17,9 +17,12 @@ what a default means, breaks every workflow that calls it.
 
 Two facts make that sharper than usual:
 
-- **The default branch is `main`**, renamed from `master`. GitHub does not
-  keep the old ref alive, so anything still pinning `@master` is broken.
-- **There are no release tags**, so callers pin `@main` (the README says so).
+- **The default branch is `master`**, with a rename to `main` pending. Both
+  workflows trigger on either name so the switch is a settings change; the
+  README pin and these lines change with it. GitHub does not keep the old ref
+  alive after a rename, so `@master` stops resolving the moment it happens.
+- **There are no release tags**, so callers pin a branch (the README says
+  which).
   Every consumer therefore tracks this branch's tip: a change is live for them
   the moment it merges, with no version to hold them back and no way to roll
   back except another commit. Cutting a `v1` tag would fix that; until then,
@@ -41,7 +44,7 @@ ruff check .                             # config in ruff.toml
 
 > **`ruff` is configured but not enforced.** `ruff.toml` sets the rules and
 > `test.yml` runs *only* pytest, so nothing checks them and the tree has
-> drifted: `ruff check .` reports 15 findings on `main`.
+> drifted: `ruff check .` reports 15 findings on `master`.
 >
 > They are style, not defects — the only one that can indicate a real bug is
 > `F841`, an unused `cmd` variable in a test, which changes no behaviour. The
