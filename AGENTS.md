@@ -11,9 +11,9 @@ Human docs: [`README.md`](README.md) (usage, the full input table),
 ## The interface is `action.yml`, and consumers pin a moving branch
 
 `action.yml`'s `inputs:` block is this repo's **public API** — `family`,
-`registry`, `cosign-key`, `images`, `stream`, `tag-pattern`, `prev_tag`,
-`curr_tag`, `handwritten`, `output`, `output-env`. Renaming one, or changing
-what a default means, breaks every workflow that calls it.
+`registry`, `cosign-key`, `images`, `commit-repo`, `stream`, `tag-pattern`,
+`prev_tag`, `curr_tag`, `handwritten`, `output`, `output-env`. Renaming one,
+or changing what a default means, breaks every workflow that calls it.
 
 Two facts make that sharper than usual:
 
@@ -59,6 +59,18 @@ implicit dependency: a change in either tool's CLI output can break parsing
 without anything in this repo changing. The tests stub these rather than
 hitting a registry, which is what makes the suite fast and offline — keep new
 tests that way.
+
+## Commit links point at whatever repo `git log` actually ran in
+
+`fetch_commits` runs `git log` in the checkout the action is executing in —
+it was never `ublue-os/bluefin`-specific, but `render_changelog` used to
+hardcode that URL for every consumer's commit links regardless of whose
+commits they were. `resolve_commit_repo_url` fixes the mismatch: explicit
+`--commit-repo` wins, then `GITHUB_REPOSITORY` (which Actions sets to the
+checked-out repo automatically — normally the right answer with zero
+configuration), then the old literal as a last-resort fallback for
+non-Actions invocations that set neither. Do not restore the literal as the
+first branch; that reintroduces the bug this exists to fix.
 
 ## When changing tag discovery
 

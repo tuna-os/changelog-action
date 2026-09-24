@@ -391,6 +391,58 @@ class TestRenderChangelog:
         assert "### ✨ Added" not in md
         assert "## 📜 Commits" not in md
 
+    def test_commit_links_use_resolved_repo_url(self):
+        # Hardcoding ublue-os/bluefin here made every consumer's commit links
+        # point at bluefin's repo regardless of whose commits they actually
+        # were. commit-repo-url is what build_release_data now resolves and
+        # stores; render_changelog must use it instead of a literal.
+        data = {
+            "prev-tag": "a",
+            "curr-tag": "b",
+            "diff": {},
+            "commits": [{"hash": "deadbeef00", "subject": "Fix it", "author": "Alice"}],
+            "commit-repo-url": "https://github.com/tuna-os/docs",
+        }
+        md = _mod.render_changelog(data)
+        assert "https://github.com/tuna-os/docs/commit/deadbeef00" in md
+        assert "ublue-os/bluefin" not in md
+
+
+# ── resolve_commit_repo_url ──────────────────────────────────────────────────
+
+class TestResolveCommitRepoUrl:
+    def test_explicit_owner_slash_repo(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert (
+            _mod.resolve_commit_repo_url("tuna-os/docs")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_explicit_full_url_is_passed_through(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert (
+            _mod.resolve_commit_repo_url("https://github.com/tuna-os/docs/")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_explicit_argument_wins_over_environment(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_REPOSITORY", "tuna-os/other")
+        assert (
+            _mod.resolve_commit_repo_url("tuna-os/docs")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_falls_back_to_github_repository_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_REPOSITORY", "tuna-os/gtk-office-suite")
+        assert (
+            _mod.resolve_commit_repo_url(None)
+            == "https://github.com/tuna-os/gtk-office-suite"
+        )
+
+    def test_falls_back_to_legacy_default_when_nothing_set(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert _mod.resolve_commit_repo_url(None) == _mod.DEFAULT_COMMIT_REPO_URL
+
 
 # ── discover_tags ────────────────────────────────────────────────────────────
 
@@ -464,6 +516,7 @@ def _action_argv(**inputs):
         *flag("registry", inputs.get("registry", "")),
         *flag("cosign-key", inputs.get("cosign-key", "")),
         *flag("images", inputs.get("images", "")),
+        *flag("commit-repo", inputs.get("commit-repo", "")),
         *flag("stream", stream),
         *flag("tag-pattern", inputs.get("tag-pattern", "")),
         *flag("handwritten", inputs.get("handwritten", "")),
@@ -527,6 +580,12 @@ class TestParseActionArgv:
         assert args.cosign_key == "https://example.invalid/cosign.pub"
         # action.yml passes `images` as one space-separated string; main() splits it.
         assert args.images == ["yellowfin albacore"]
+
+    def test_commit_repo_survives_action_argv_round_trip(self):
+        args = _mod.parse_args(_action_argv(
+            family="bluefin", prev_tag="a", curr_tag="b",
+            **{"commit-repo": "tuna-os/docs"}))
+        assert args.commit_repo == "tuna-os/docs"
 
     def test_boolean_and_optional_file_inputs(self):
         args = _mod.parse_args(_action_argv(

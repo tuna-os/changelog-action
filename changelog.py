@@ -2,6 +2,7 @@
 
 import sys
 import json
+import os
 import subprocess
 import time
 import re
@@ -60,6 +61,39 @@ VARIANT_LABELS = {
 
 RETRIES = 3
 RETRY_WAIT_S = 2.0
+
+# Legacy fallback for commit links when neither --commit-repo nor the
+# GITHUB_REPOSITORY environment variable (set automatically by GitHub Actions
+# for the checked-out repo) is available. `fetch_commits` runs `git log`
+# against whatever repo the action's checkout is in — that is almost always
+# GITHUB_REPOSITORY, not this literal fallback. Keeping the old ublue-os/bluefin
+# value here rather than an empty string only avoids changing rendered output
+# for anyone invoking changelog.py completely outside GitHub Actions with
+# neither GITHUB_REPOSITORY set nor --commit-repo passed.
+DEFAULT_COMMIT_REPO_URL = "https://github.com/ublue-os/bluefin"
+
+
+def resolve_commit_repo_url(commit_repo: str | None) -> str:
+    """Resolve the base URL used for commit links in the rendered changelog.
+
+    Precedence: explicit --commit-repo, then GITHUB_REPOSITORY (set
+    automatically by GitHub Actions for the checked-out repo — this is what
+    `git log` in fetch_commits() actually read from), then the legacy
+    ublue-os/bluefin fallback for non-Actions invocations that pass neither.
+
+    --commit-repo accepts either a full URL or a bare "owner/repo" slug, to
+    match how GITHUB_REPOSITORY itself is shaped.
+    """
+    if commit_repo:
+        commit_repo = commit_repo.rstrip("/")
+        if commit_repo.startswith(("http://", "https://")):
+            return commit_repo
+        return f"https://github.com/{commit_repo}"
+    gh_repo = os.environ.get("GITHUB_REPOSITORY")
+    if gh_repo:
+        return f"https://github.com/{gh_repo}"
+    return DEFAULT_COMMIT_REPO_URL
+
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -576,13 +610,14 @@ def render_changelog(data: dict, handwritten: str = "") -> str:
 
     commits = data.get("commits", [])
     if commits:
+        repo_url = data.get("commit-repo-url") or DEFAULT_COMMIT_REPO_URL
         lines.append("## 📜 Commits")
         lines.append("| Hash | Subject | Author |")
         lines.append("| --- | --- | --- |")
         for commit in commits:
             short_hash = commit["hash"][:7]
             lines.append(
-                f"| 🔹 **[{short_hash}](https://github.com/ublue-os/bluefin/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
+                f"| 🔹 **[{short_hash}]({repo_url}/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
             )
         lines.append("")
 
@@ -616,6 +651,7 @@ def build_release_data(
     images: list[str] | None = None,
     registry: str | None = None,
     cosign_key: str | None = None,
+    commit_repo: str | None = None,
 ) -> dict:
     # Resolve registry, cosign_key, and images from explicit args or IMAGE_CONFIGS.
     if registry and cosign_key:
@@ -647,6 +683,7 @@ def build_release_data(
         "common-packages": common_packages(curr_release),
         "diff": diff,
         "commits": commits,
+        "commit-repo-url": resolve_commit_repo_url(commit_repo),
         "website": website,
     }
 
@@ -725,6 +762,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs="+",
         metavar="IMAGE",
         help="Image names to compare (e.g. yellowfin albacore). Overrides the family default.",
+    )
+    parser.add_argument(
+        "--commit-repo",
+        metavar="OWNER/REPO_OR_URL",
+        help=(
+            "Repository the '## Commits' section links to, as 'owner/repo' or a full "
+            "https URL. Defaults to the GITHUB_REPOSITORY Actions sets for the checked-out "
+            "repo, then to a legacy ublue-os/bluefin fallback if neither is available."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -806,6 +852,7 @@ def main():
         images=args.images,
         registry=args.registry,
         cosign_key=args.cosign_key,
+        commit_repo=args.commit_repo,
     )
 
     if args.json:
