@@ -14,6 +14,9 @@ inputs:
   images:
     description: 'Space-separated list of image names to compare (e.g. "yellowfin albacore"). Overrides the family default.'
     required: false
+  commit-repo:
+    description: 'Repository the "## Commits" section links to, as "owner/repo" or a full URL. Defaults to GITHUB_REPOSITORY (the checked-out repo), then to a legacy fallback if that is unset.'
+    required: false
   stream:
     description: 'Release stream for auto-discovery (e.g. stable, latest, gnome). Finds the two most recent {stream}-YYYYMMDD tags.'
     required: false
@@ -57,6 +60,8 @@ runs:
     - ${{ inputs.cosign-key }}
     - ${{ inputs.images && '--images' || '' }}
     - ${{ inputs.images }}
+    - ${{ inputs.commit-repo && '--commit-repo' || '' }}
+    - ${{ inputs.commit-repo }}
     - ${{ inputs.stream && '--stream' || '' }}
     - ${{ inputs.stream }}
     - ${{ inputs.tag-pattern && '--tag-pattern' || '' }}

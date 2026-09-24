@@ -35,6 +35,7 @@ It supports both explicit tag comparison and automatic tag discovery based on a 
 | `registry` | Container registry URL | Yes* | |
 | `cosign-key` | URL or path to cosign public key | Yes* | |
 | `images` | Space-separated list of image names (e.g. `bonito skipjack`) | Yes* | |
+| `commit-repo` | Repository the "Commits" section links to, as `owner/repo` or a full URL | No | `GITHUB_REPOSITORY`, then a legacy fallback |
 | `stream` | Release stream for auto-discovery (e.g. `stable`, `latest`) | No | |
 | `tag-pattern` | Regex for tag discovery (e.g. `^\d{8}$`). Only used when `stream` is set | No | |
 | `prev_tag` | Previous release tag (ignored if `stream` is set) | No | |
