@@ -39,9 +39,6 @@ IMAGE_CONFIGS = {
     },
 }
 
-# Default family if none is specified
-DEFAULT_FAMILY = "bluefin"
-
 FEATURED_PACKAGES = {
     "kernel": "kernel",
     "gnome": "gnome-shell",
@@ -659,7 +656,23 @@ def build_release_data(
 # ----------------------------------------------------------------------------
 
 
-def parse_args() -> argparse.Namespace:
+def normalize_argv(argv: list[str]) -> list[str]:
+    """Drop the padding action.yml emits for unset inputs.
+
+    action.yml builds a fixed-width `args` list in which every optional input
+    contributes a slot whether or not it was set, so a Docker invocation that
+    sets only `stream` still hands the entrypoint roughly a dozen empty-string
+    arguments. argparse would reject them: only two positionals are declared.
+
+    The filter is content-based rather than position-based, which is why it is
+    named and testable here instead of buried in main(): it cannot distinguish
+    padding from a flag value that happens to be empty or the literal string
+    "false", and any change to action.yml's input list changes what it strips.
+    """
+    return [arg for arg in argv if arg.strip() and arg.strip() != "false"]
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a changelog between two container image releases using SBOM attestations.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -739,12 +752,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
-    return parser.parse_args()
+    return parser.parse_args(normalize_argv(sys.argv[1:] if argv is None else argv))
 
 
 def main():
-    import sys
-    sys.argv = [arg for arg in sys.argv if arg.strip() and arg.strip() != "false"]
     args = parse_args()
 
     if args.verbose:

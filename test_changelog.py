@@ -437,3 +437,109 @@ class TestFeatured:
         assert set(featured) <= set(packages)
         data = _mod.build_website_data({"img": {"packages": packages}})
         assert set(data["img"]["featured"]) == set(featured)
+
+
+# ── CLI argument contract ────────────────────────────────────────────────────
+#
+# action.yml builds a fixed-width `args` list: every optional input contributes
+# a slot whether or not it was set, so a Docker invocation that sets only some
+# inputs still passes empty strings positionally. changelog.py declares two
+# nargs="?" positionals, so the surplus has to be dropped before argparse sees
+# it. That seam is the only one both published surfaces (the action and the
+# standalone entrypoint) cross, and nothing covered it.
+
+
+def _action_argv(**inputs):
+    """Reproduce the argv action.yml emits for the given set of inputs.
+
+    Mirrors runs.args one slot per line, including the empty strings GitHub
+    substitutes for unset inputs.
+    """
+    def flag(name, value):
+        return [f"--{name}", value] if value else ["", ""]
+
+    stream = inputs.get("stream", "")
+    return [
+        *flag("family", inputs.get("family", "")),
+        *flag("registry", inputs.get("registry", "")),
+        *flag("cosign-key", inputs.get("cosign-key", "")),
+        *flag("images", inputs.get("images", "")),
+        *flag("stream", stream),
+        *flag("tag-pattern", inputs.get("tag-pattern", "")),
+        *flag("handwritten", inputs.get("handwritten", "")),
+        "--output", inputs.get("output", "changelog.md"),
+        *flag("output-env", inputs.get("output-env", "")),
+        "--json" if inputs.get("json") == "true" else "",
+        "--verbose" if inputs.get("verbose") == "true" else "",
+        "" if stream else inputs.get("prev_tag", ""),
+        "" if stream else inputs.get("curr_tag", ""),
+    ]
+
+
+class TestNormalizeArgv:
+    def test_drops_padding_without_touching_real_arguments(self):
+        argv = _action_argv(family="bluefin", prev_tag="stable-20250101",
+                            curr_tag="stable-20250201")
+        assert _mod.normalize_argv(argv) == [
+            "--family", "bluefin",
+            "--output", "changelog.md",
+            "stable-20250101", "stable-20250201",
+        ]
+
+    def test_does_not_mutate_its_input(self):
+        argv = _action_argv(family="bluefin", prev_tag="a", curr_tag="b")
+        before = list(argv)
+        _mod.normalize_argv(argv)
+        assert argv == before
+
+    def test_parse_args_leaves_sys_argv_alone(self, monkeypatch):
+        """The normalizer is a pure function; parsing must not rewrite the process."""
+        sentinel = ["changelog.py", "", "--family", "bluefin", "a", "b"]
+        monkeypatch.setattr(sys, "argv", list(sentinel))
+        _mod.parse_args(_action_argv(family="bluefin", prev_tag="a", curr_tag="b"))
+        assert sys.argv == sentinel
+
+
+class TestParseActionArgv:
+    def test_family_with_explicit_tags(self):
+        args = _mod.parse_args(_action_argv(
+            family="aurora", prev_tag="stable-20250101", curr_tag="stable-20250201"))
+        assert args.family == "aurora"
+        assert (args.prev_tag, args.curr_tag) == ("stable-20250101", "stable-20250201")
+        assert args.stream is None
+        assert args.json is False and args.verbose is False
+        assert args.output == "changelog.md"
+
+    def test_stream_discovery_leaves_positionals_unset(self):
+        """With `stream` set, action.yml blanks prev_tag/curr_tag; main() then
+        takes the discover_tags branch, which requires both to be falsy."""
+        args = _mod.parse_args(_action_argv(family="bluefin", stream="stable"))
+        assert args.stream == "stable"
+        assert args.prev_tag is None and args.curr_tag is None
+
+    def test_explicit_registry_key_and_images(self):
+        args = _mod.parse_args(_action_argv(
+            registry="ghcr.io/tuna-os/",
+            **{"cosign-key": "https://example.invalid/cosign.pub"},
+            images="yellowfin albacore",
+            prev_tag="a", curr_tag="b"))
+        assert args.registry == "ghcr.io/tuna-os/"
+        assert args.cosign_key == "https://example.invalid/cosign.pub"
+        # action.yml passes `images` as one space-separated string; main() splits it.
+        assert args.images == ["yellowfin albacore"]
+
+    def test_boolean_and_optional_file_inputs(self):
+        args = _mod.parse_args(_action_argv(
+            family="bluefin", prev_tag="a", curr_tag="b",
+            json="true", verbose="true", output="out.json",
+            **{"output-env": "release.env"}))
+        assert args.json is True and args.verbose is True
+        assert args.output == "out.json"
+        assert args.output_env == "release.env"
+
+    def test_tag_pattern_and_handwritten_survive(self):
+        args = _mod.parse_args(_action_argv(
+            family="bluefin", stream="stable",
+            **{"tag-pattern": r"^\d{8}$"}, handwritten="Intro text."))
+        assert args.tag_pattern == r"^\d{8}$"
+        assert args.handwritten == "Intro text."
