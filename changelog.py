@@ -98,6 +98,76 @@ def retry(n: int, f: Callable) -> Any:
 # ----------------------------------------------------------------------------
 
 
+class TargetConfigError(ValueError):
+    """Raised when the inputs do not describe one usable target configuration."""
+
+
+def resolve_target(
+    family: str | None = None,
+    registry: str | None = None,
+    cosign_key: str | None = None,
+    images: list[str] | None = None,
+    require_cosign_key: bool = True,
+) -> tuple[str, str | None, list[str]]:
+    """Resolve one target configuration from the inputs.
+
+    This is the single source of truth for the rule "what counts as a usable
+    target". It used to be written out three times -- in main(), in
+    discover_tags() and in build_release_data() -- with three different
+    conditions, so the same inputs could be accepted in one place, rejected in
+    another, and silently completed from a different source in a third.
+
+    Two modes:
+
+    - A known ``family`` supplies registry, cosign key and image list, and any
+      of the three may be overridden explicitly (action.yml documents
+      ``images`` as an override). Overriding the registry while leaving the
+      family's cosign key in place verifies one project's attestations against
+      another project's key, so that combination warns.
+    - Without a family, the caller must supply the whole set: registry, images
+      and (when the caller will verify attestations) the cosign key. A partial
+      set is an error rather than something to complete from IMAGE_CONFIGS.
+
+    ``require_cosign_key`` is False for tag discovery, which only lists tags
+    and never verifies an attestation.
+    """
+    if family:
+        config = IMAGE_CONFIGS.get(family)
+        if config is None:
+            raise TargetConfigError(
+                f"Unknown --family '{family}'. "
+                f"Known families: {list(IMAGE_CONFIGS.keys())}"
+            )
+        if registry and registry != config["registry"] and not cosign_key:
+            log.warning(
+                f"--registry overrides family '{family}' but --cosign-key does not: "
+                f"attestations will be verified against {config['cosign_key']}."
+            )
+        return (
+            registry or config["registry"],
+            cosign_key or config["cosign_key"],
+            images or list(config["images"]),
+        )
+
+    missing = [
+        name
+        for name, value in (
+            ("--registry", registry),
+            ("--cosign-key", cosign_key if require_cosign_key else "-"),
+            ("--images", images),
+        )
+        if not value
+    ]
+    if missing:
+        detail = " and ".join(f"{name} must be provided" for name in missing)
+        raise TargetConfigError(
+            f"Either --registry + --cosign-key + --images, or a known --family must be "
+            f"provided: {detail} when --family is not used. "
+            f"Known families: {list(IMAGE_CONFIGS.keys())}"
+        )
+    return registry, cosign_key, images
+
+
 def fetch_manifest(registry: str, image: str, tag: str) -> dict:
     def _fetch():
         out = run_cmd(["skopeo", "inspect", f"docker://{registry}{image}:{tag}"])
@@ -441,17 +511,13 @@ def discover_tags(
       - explicit registry + images arguments, or
       - IMAGE_CONFIGS[family] (legacy behaviour, requires a known family).
     """
-    if registry and images:
-        image = images[0]
-    else:
-        config = IMAGE_CONFIGS.get(family or "")
-        if not config:
-            raise ValueError(
-                f"Either --registry + --images, or a known --family must be provided. "
-                f"Known families: {list(IMAGE_CONFIGS.keys())}"
-            )
-        registry = config["registry"]
-        image = config["images"][0]
+    registry, _cosign_key, images = resolve_target(
+        family=family,
+        registry=registry,
+        images=images,
+        require_cosign_key=False,
+    )
+    image = images[0]
 
     log.info(f"Discovering tags for stream '{stream}' on {registry}{image}...")
     tags = get_tag_list(registry, image, stream)
@@ -617,20 +683,13 @@ def build_release_data(
     registry: str | None = None,
     cosign_key: str | None = None,
 ) -> dict:
-    # Resolve registry, cosign_key, and images from explicit args or IMAGE_CONFIGS.
-    if registry and cosign_key:
-        if not images:
-            raise ValueError("--images must be provided when --registry and --cosign-key are used")
-    else:
-        config = IMAGE_CONFIGS.get(family or "")
-        if config is None:
-            raise ValueError(
-                f"Either --registry + --cosign-key + --images, or a known --family must be provided. "
-                f"Known families: {list(IMAGE_CONFIGS.keys())}"
-            )
-        registry = registry or config["registry"]
-        cosign_key = cosign_key or config["cosign_key"]
-        images = images or config["images"]
+    # Resolve registry, cosign_key, and images (single source of truth).
+    registry, cosign_key, images = resolve_target(
+        family=family,
+        registry=registry,
+        cosign_key=cosign_key,
+        images=images,
+    )
 
     prev_release = build_release(registry, cosign_key, images, prev_tag)
     curr_release = build_release(registry, cosign_key, images, curr_tag)
@@ -766,13 +825,17 @@ def main():
     if args.images and len(args.images) == 1 and " " in args.images[0]:
         args.images = args.images[0].split()
 
-    # Validate: need either a known family, or explicit registry+cosign-key
-    using_explicit = args.registry and args.cosign_key
-    using_family = args.family is not None
-    if not using_explicit and not using_family:
-        log.error(
-            "Either --family (e.g. bluefin) OR both --registry and --cosign-key must be provided."
+    # Validate up front, through the same resolver the work later uses, so bad
+    # input exits cleanly here instead of raising a traceback mid-run.
+    try:
+        resolve_target(
+            family=args.family,
+            registry=args.registry,
+            cosign_key=args.cosign_key,
+            images=args.images,
         )
+    except TargetConfigError as err:
+        log.error(str(err))
         sys.exit(1)
 
     # Discover or validate tags

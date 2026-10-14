@@ -543,3 +543,57 @@ class TestParseActionArgv:
             **{"tag-pattern": r"^\d{8}$"}, handwritten="Intro text."))
         assert args.tag_pattern == r"^\d{8}$"
         assert args.handwritten == "Intro text."
+
+
+# ── target resolution ────────────────────────────────────────────────────────
+
+class TestResolveTarget:
+    def test_known_family_supplies_everything(self):
+        registry, key, images = _mod.resolve_target(family="bluefin")
+        assert registry == _mod.IMAGE_CONFIGS["bluefin"]["registry"]
+        assert key == _mod.IMAGE_CONFIGS["bluefin"]["cosign_key"]
+        assert images == _mod.IMAGE_CONFIGS["bluefin"]["images"]
+
+    def test_unknown_family_is_rejected(self):
+        with pytest.raises(_mod.TargetConfigError, match="Unknown --family"):
+            _mod.resolve_target(family="bogus")
+
+    def test_partial_explicit_configuration_is_rejected(self):
+        with pytest.raises(_mod.TargetConfigError, match="--cosign-key must be provided"):
+            _mod.resolve_target(registry="r/", images=["img"])
+
+    def test_discovery_does_not_require_a_cosign_key(self):
+        registry, key, images = _mod.resolve_target(
+            registry="r/", images=["img"], require_cosign_key=False
+        )
+        assert (registry, key, images) == ("r/", None, ["img"])
+
+    def test_registry_override_without_key_override_warns(self, caplog):
+        with caplog.at_level("WARNING"):
+            registry, key, _ = _mod.resolve_target(family="bluefin", registry="other/")
+        assert registry == "other/"
+        assert key == _mod.IMAGE_CONFIGS["bluefin"]["cosign_key"]
+        assert "--cosign-key does not" in caplog.text
+
+    def test_images_override_keeps_family_registry_and_key(self):
+        registry, key, images = _mod.resolve_target(family="aurora", images=["only"])
+        assert images == ["only"]
+        assert registry == _mod.IMAGE_CONFIGS["aurora"]["registry"]
+        assert key == _mod.IMAGE_CONFIGS["aurora"]["cosign_key"]
+
+    def test_family_config_is_not_mutated_by_callers(self):
+        _, _, images = _mod.resolve_target(family="bluefin")
+        images.append("extra")
+        assert "extra" not in _mod.IMAGE_CONFIGS["bluefin"]["images"]
+
+
+class TestMainValidation:
+    def test_partial_explicit_configuration_exits_one(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            sys, "argv", ["changelog.py", "--registry", "ghcr.io/x/", "a", "b"]
+        )
+        with caplog.at_level("ERROR"):
+            with pytest.raises(SystemExit) as exc:
+                _mod.main()
+        assert exc.value.code == 1
+        assert "--cosign-key must be provided" in caplog.text
