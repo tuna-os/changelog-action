@@ -139,7 +139,7 @@ class TestFetchCommits:
 
     def test_git_failure_is_empty_list(self, monkeypatch):
         def boom(cmd):
-            raise RuntimeError("git not available")
+            raise _mod.CommandError("git not available")
 
         monkeypatch.setattr(_mod, "run_cmd", boom)
         assert _mod.fetch_commits("v1", "v2") == []
@@ -170,6 +170,17 @@ class TestRetry:
         with pytest.raises(ValueError, match="nope"):
             _mod.retry(2, always_fails)
         assert len(calls) == 2  # no retry past the limit
+
+    def test_programming_error_is_not_retried(self):
+        calls = []
+
+        def broken():
+            calls.append(1)
+            raise TypeError("bad call in this script, not a flaky registry")
+
+        with pytest.raises(TypeError):
+            _mod.retry(3, broken)
+        assert len(calls) == 1  # fail fast: a defect here is not transient
 
 
 class TestExtractPayloads:
@@ -229,7 +240,7 @@ class TestRegistryRetrieval:
         def fake_run(cmd):
             calls.append(cmd)
             if "spdxjson" in cmd:
-                raise RuntimeError("missing stable attestation")
+                raise _mod.CommandError("missing stable attestation")
             return json.dumps({"payload": payload})
 
         monkeypatch.setattr(_mod, "run_cmd", fake_run)
@@ -391,6 +402,58 @@ class TestRenderChangelog:
         assert "### ✨ Added" not in md
         assert "## 📜 Commits" not in md
 
+    def test_commit_links_use_resolved_repo_url(self):
+        # Hardcoding ublue-os/bluefin here made every consumer's commit links
+        # point at bluefin's repo regardless of whose commits they actually
+        # were. commit-repo-url is what build_release_data now resolves and
+        # stores; render_changelog must use it instead of a literal.
+        data = {
+            "prev-tag": "a",
+            "curr-tag": "b",
+            "diff": {},
+            "commits": [{"hash": "deadbeef00", "subject": "Fix it", "author": "Alice"}],
+            "commit-repo-url": "https://github.com/tuna-os/docs",
+        }
+        md = _mod.render_changelog(data)
+        assert "https://github.com/tuna-os/docs/commit/deadbeef00" in md
+        assert "ublue-os/bluefin" not in md
+
+
+# ── resolve_commit_repo_url ──────────────────────────────────────────────────
+
+class TestResolveCommitRepoUrl:
+    def test_explicit_owner_slash_repo(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert (
+            _mod.resolve_commit_repo_url("tuna-os/docs")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_explicit_full_url_is_passed_through(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert (
+            _mod.resolve_commit_repo_url("https://github.com/tuna-os/docs/")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_explicit_argument_wins_over_environment(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_REPOSITORY", "tuna-os/other")
+        assert (
+            _mod.resolve_commit_repo_url("tuna-os/docs")
+            == "https://github.com/tuna-os/docs"
+        )
+
+    def test_falls_back_to_github_repository_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_REPOSITORY", "tuna-os/gtk-office-suite")
+        assert (
+            _mod.resolve_commit_repo_url(None)
+            == "https://github.com/tuna-os/gtk-office-suite"
+        )
+
+    def test_falls_back_to_legacy_default_when_nothing_set(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        assert _mod.resolve_commit_repo_url(None) == _mod.DEFAULT_COMMIT_REPO_URL
+
 
 # ── discover_tags ────────────────────────────────────────────────────────────
 
@@ -464,6 +527,7 @@ def _action_argv(**inputs):
         *flag("registry", inputs.get("registry", "")),
         *flag("cosign-key", inputs.get("cosign-key", "")),
         *flag("images", inputs.get("images", "")),
+        *flag("commit-repo", inputs.get("commit-repo", "")),
         *flag("stream", stream),
         *flag("tag-pattern", inputs.get("tag-pattern", "")),
         *flag("handwritten", inputs.get("handwritten", "")),
@@ -528,6 +592,12 @@ class TestParseActionArgv:
         # action.yml passes `images` as one space-separated string; main() splits it.
         assert args.images == ["yellowfin albacore"]
 
+    def test_commit_repo_survives_action_argv_round_trip(self):
+        args = _mod.parse_args(_action_argv(
+            family="bluefin", prev_tag="a", curr_tag="b",
+            **{"commit-repo": "tuna-os/docs"}))
+        assert args.commit_repo == "tuna-os/docs"
+
     def test_boolean_and_optional_file_inputs(self):
         args = _mod.parse_args(_action_argv(
             family="bluefin", prev_tag="a", curr_tag="b",
@@ -543,3 +613,57 @@ class TestParseActionArgv:
             **{"tag-pattern": r"^\d{8}$"}, handwritten="Intro text."))
         assert args.tag_pattern == r"^\d{8}$"
         assert args.handwritten == "Intro text."
+
+
+# ── target resolution ────────────────────────────────────────────────────────
+
+class TestResolveTarget:
+    def test_known_family_supplies_everything(self):
+        registry, key, images = _mod.resolve_target(family="bluefin")
+        assert registry == _mod.IMAGE_CONFIGS["bluefin"]["registry"]
+        assert key == _mod.IMAGE_CONFIGS["bluefin"]["cosign_key"]
+        assert images == _mod.IMAGE_CONFIGS["bluefin"]["images"]
+
+    def test_unknown_family_is_rejected(self):
+        with pytest.raises(_mod.TargetConfigError, match="Unknown --family"):
+            _mod.resolve_target(family="bogus")
+
+    def test_partial_explicit_configuration_is_rejected(self):
+        with pytest.raises(_mod.TargetConfigError, match="--cosign-key must be provided"):
+            _mod.resolve_target(registry="r/", images=["img"])
+
+    def test_discovery_does_not_require_a_cosign_key(self):
+        registry, key, images = _mod.resolve_target(
+            registry="r/", images=["img"], require_cosign_key=False
+        )
+        assert (registry, key, images) == ("r/", None, ["img"])
+
+    def test_registry_override_without_key_override_warns(self, caplog):
+        with caplog.at_level("WARNING"):
+            registry, key, _ = _mod.resolve_target(family="bluefin", registry="other/")
+        assert registry == "other/"
+        assert key == _mod.IMAGE_CONFIGS["bluefin"]["cosign_key"]
+        assert "--cosign-key does not" in caplog.text
+
+    def test_images_override_keeps_family_registry_and_key(self):
+        registry, key, images = _mod.resolve_target(family="aurora", images=["only"])
+        assert images == ["only"]
+        assert registry == _mod.IMAGE_CONFIGS["aurora"]["registry"]
+        assert key == _mod.IMAGE_CONFIGS["aurora"]["cosign_key"]
+
+    def test_family_config_is_not_mutated_by_callers(self):
+        _, _, images = _mod.resolve_target(family="bluefin")
+        images.append("extra")
+        assert "extra" not in _mod.IMAGE_CONFIGS["bluefin"]["images"]
+
+
+class TestMainValidation:
+    def test_partial_explicit_configuration_exits_one(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            sys, "argv", ["changelog.py", "--registry", "ghcr.io/x/", "a", "b"]
+        )
+        with caplog.at_level("ERROR"):
+            with pytest.raises(SystemExit) as exc:
+                _mod.main()
+        assert exc.value.code == 1
+        assert "--cosign-key must be provided" in caplog.text

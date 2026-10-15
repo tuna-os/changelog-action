@@ -2,6 +2,7 @@
 
 import sys
 import json
+import os
 import subprocess
 import time
 import re
@@ -61,6 +62,39 @@ VARIANT_LABELS = {
 RETRIES = 3
 RETRY_WAIT_S = 2.0
 
+# Legacy fallback for commit links when neither --commit-repo nor the
+# GITHUB_REPOSITORY environment variable (set automatically by GitHub Actions
+# for the checked-out repo) is available. `fetch_commits` runs `git log`
+# against whatever repo the action's checkout is in — that is almost always
+# GITHUB_REPOSITORY, not this literal fallback. Keeping the old ublue-os/bluefin
+# value here rather than an empty string only avoids changing rendered output
+# for anyone invoking changelog.py completely outside GitHub Actions with
+# neither GITHUB_REPOSITORY set nor --commit-repo passed.
+DEFAULT_COMMIT_REPO_URL = "https://github.com/ublue-os/bluefin"
+
+
+def resolve_commit_repo_url(commit_repo: str | None) -> str:
+    """Resolve the base URL used for commit links in the rendered changelog.
+
+    Precedence: explicit --commit-repo, then GITHUB_REPOSITORY (set
+    automatically by GitHub Actions for the checked-out repo — this is what
+    `git log` in fetch_commits() actually read from), then the legacy
+    ublue-os/bluefin fallback for non-Actions invocations that pass neither.
+
+    --commit-repo accepts either a full URL or a bare "owner/repo" slug, to
+    match how GITHUB_REPOSITORY itself is shaped.
+    """
+    if commit_repo:
+        commit_repo = commit_repo.rstrip("/")
+        if commit_repo.startswith(("http://", "https://")):
+            return commit_repo
+        return f"https://github.com/{commit_repo}"
+    gh_repo = os.environ.get("GITHUB_REPOSITORY")
+    if gh_repo:
+        return f"https://github.com/{gh_repo}"
+    return DEFAULT_COMMIT_REPO_URL
+
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
@@ -69,12 +103,26 @@ log = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------
 
 
+class CommandError(RuntimeError):
+    """An external command (skopeo, cosign, oras, zstd, git) exited non-zero."""
+
+
+# Failures that mean "this registry, image, tag or payload did not work out":
+# a command exited non-zero (CommandError), a payload did not parse or did not
+# contain what it must (ValueError, which covers json.JSONDecodeError,
+# binascii.Error and UnicodeDecodeError), or the filesystem/network layer
+# refused (OSError). Everything else — TypeError, KeyError, AttributeError —
+# is a defect in this script, and retrying it three times or logging it as a
+# skipped payload only hides it behind a plausible-looking changelog.
+RECOVERABLE = (CommandError, ValueError, OSError)
+
+
 def run_cmd(cmd: list[str]) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode == 0:
         return result.stdout
     else:
-        raise Exception(
+        raise CommandError(
             f"Command failed\nCmd: {cmd}\nExit: {result.returncode}\nErr: {result.stderr}"
         )
 
@@ -83,7 +131,7 @@ def retry(n: int, f: Callable) -> Any:
     for attempt in range(1, n + 1):
         try:
             return f()
-        except Exception as e:
+        except RECOVERABLE as e:
             if attempt < n:
                 log.warning(
                     f"Attempt {attempt}/{n} failed: {e}. Retrying in {RETRY_WAIT_S}s…"
@@ -96,6 +144,76 @@ def retry(n: int, f: Callable) -> Any:
 # ----------------------------------------------------------------------------
 # SBOM Fetching
 # ----------------------------------------------------------------------------
+
+
+class TargetConfigError(ValueError):
+    """Raised when the inputs do not describe one usable target configuration."""
+
+
+def resolve_target(
+    family: str | None = None,
+    registry: str | None = None,
+    cosign_key: str | None = None,
+    images: list[str] | None = None,
+    require_cosign_key: bool = True,
+) -> tuple[str, str | None, list[str]]:
+    """Resolve one target configuration from the inputs.
+
+    This is the single source of truth for the rule "what counts as a usable
+    target". It used to be written out three times -- in main(), in
+    discover_tags() and in build_release_data() -- with three different
+    conditions, so the same inputs could be accepted in one place, rejected in
+    another, and silently completed from a different source in a third.
+
+    Two modes:
+
+    - A known ``family`` supplies registry, cosign key and image list, and any
+      of the three may be overridden explicitly (action.yml documents
+      ``images`` as an override). Overriding the registry while leaving the
+      family's cosign key in place verifies one project's attestations against
+      another project's key, so that combination warns.
+    - Without a family, the caller must supply the whole set: registry, images
+      and (when the caller will verify attestations) the cosign key. A partial
+      set is an error rather than something to complete from IMAGE_CONFIGS.
+
+    ``require_cosign_key`` is False for tag discovery, which only lists tags
+    and never verifies an attestation.
+    """
+    if family:
+        config = IMAGE_CONFIGS.get(family)
+        if config is None:
+            raise TargetConfigError(
+                f"Unknown --family '{family}'. "
+                f"Known families: {list(IMAGE_CONFIGS.keys())}"
+            )
+        if registry and registry != config["registry"] and not cosign_key:
+            log.warning(
+                f"--registry overrides family '{family}' but --cosign-key does not: "
+                f"attestations will be verified against {config['cosign_key']}."
+            )
+        return (
+            registry or config["registry"],
+            cosign_key or config["cosign_key"],
+            images or list(config["images"]),
+        )
+
+    missing = [
+        name
+        for name, value in (
+            ("--registry", registry),
+            ("--cosign-key", cosign_key if require_cosign_key else "-"),
+            ("--images", images),
+        )
+        if not value
+    ]
+    if missing:
+        detail = " and ".join(f"{name} must be provided" for name in missing)
+        raise TargetConfigError(
+            f"Either --registry + --cosign-key + --images, or a known --family must be "
+            f"provided: {detail} when --family is not used. "
+            f"Known families: {list(IMAGE_CONFIGS.keys())}"
+        )
+    return registry, cosign_key, images
 
 
 def fetch_manifest(registry: str, image: str, tag: str) -> dict:
@@ -168,13 +286,13 @@ def fetch_sbom(registry: str, cosign_key: str, image: str, digest: str) -> dict:
 
         try:
             raw = run_cmd(cmd_stable)
-        except Exception as e_stable:
+        except RECOVERABLE as e_stable:
             log.debug(
                 f"spdxjson attestation failed: {e_stable}. Trying zstd attestation..."
             )
             try:
                 raw = run_cmd(cmd_lts)
-            except Exception as e_lts:
+            except RECOVERABLE as e_lts:
                 raise ValueError(
                     f"Failed to fetch any attestation. Stable error: {e_stable} | LTS error: {e_lts}"
                 )
@@ -210,7 +328,7 @@ def fetch_sbom(registry: str, cosign_key: str, image: str, digest: str) -> dict:
 
                 if predicate.get("artifacts") or predicate.get("packages"):
                     return predicate
-            except Exception as e:
+            except RECOVERABLE as e:
                 log.warning(f"Skipping payload that failed to decode: {e}")
                 continue
 
@@ -323,7 +441,7 @@ def fetch_packages(registry: str, cosign_key: str, image: str, tag: str) -> dict
     digest = get_digest(registry, image, tag)
     try:
         sbom = retry(RETRIES, lambda: fetch_sbom_oras(registry, image, digest))
-    except Exception as oras_err:
+    except RECOVERABLE as oras_err:
         log.debug(
             f"ORAS referrer fetch failed for {image}@{digest}: {oras_err}. "
             f"Falling back to cosign attestation..."
@@ -398,7 +516,7 @@ def fetch_commits(prev_tag: str, curr_tag: str) -> list[dict]:
         out = run_cmd(
             ["git", "log", "--pretty=format:%H;%s;%an", f"{prev_tag}..{curr_tag}"]
         )
-    except Exception as e:
+    except RECOVERABLE as e:
         log.warning(
             f"Could not fetch git commits between {prev_tag} and {curr_tag}: {e}"
         )
@@ -441,17 +559,13 @@ def discover_tags(
       - explicit registry + images arguments, or
       - IMAGE_CONFIGS[family] (legacy behaviour, requires a known family).
     """
-    if registry and images:
-        image = images[0]
-    else:
-        config = IMAGE_CONFIGS.get(family or "")
-        if not config:
-            raise ValueError(
-                f"Either --registry + --images, or a known --family must be provided. "
-                f"Known families: {list(IMAGE_CONFIGS.keys())}"
-            )
-        registry = config["registry"]
-        image = config["images"][0]
+    registry, _cosign_key, images = resolve_target(
+        family=family,
+        registry=registry,
+        images=images,
+        require_cosign_key=False,
+    )
+    image = images[0]
 
     log.info(f"Discovering tags for stream '{stream}' on {registry}{image}...")
     tags = get_tag_list(registry, image, stream)
@@ -491,7 +605,7 @@ def discover_tags(
                 sbom_tags.append(t)
             else:
                 log.debug(f"Tag {t} has no SBOM referrer — skipping.")
-        except Exception as e:
+        except RECOVERABLE as e:
             log.debug(f"Could not check SBOM for tag {t}: {e} — skipping.")
 
     if len(sbom_tags) < 2:
@@ -576,13 +690,14 @@ def render_changelog(data: dict, handwritten: str = "") -> str:
 
     commits = data.get("commits", [])
     if commits:
+        repo_url = data.get("commit-repo-url") or DEFAULT_COMMIT_REPO_URL
         lines.append("## 📜 Commits")
         lines.append("| Hash | Subject | Author |")
         lines.append("| --- | --- | --- |")
         for commit in commits:
             short_hash = commit["hash"][:7]
             lines.append(
-                f"| 🔹 **[{short_hash}](https://github.com/ublue-os/bluefin/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
+                f"| 🔹 **[{short_hash}]({repo_url}/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
             )
         lines.append("")
 
@@ -616,21 +731,15 @@ def build_release_data(
     images: list[str] | None = None,
     registry: str | None = None,
     cosign_key: str | None = None,
+    commit_repo: str | None = None,
 ) -> dict:
-    # Resolve registry, cosign_key, and images from explicit args or IMAGE_CONFIGS.
-    if registry and cosign_key:
-        if not images:
-            raise ValueError("--images must be provided when --registry and --cosign-key are used")
-    else:
-        config = IMAGE_CONFIGS.get(family or "")
-        if config is None:
-            raise ValueError(
-                f"Either --registry + --cosign-key + --images, or a known --family must be provided. "
-                f"Known families: {list(IMAGE_CONFIGS.keys())}"
-            )
-        registry = registry or config["registry"]
-        cosign_key = cosign_key or config["cosign_key"]
-        images = images or config["images"]
+    # Resolve registry, cosign_key, and images (single source of truth).
+    registry, cosign_key, images = resolve_target(
+        family=family,
+        registry=registry,
+        cosign_key=cosign_key,
+        images=images,
+    )
 
     prev_release = build_release(registry, cosign_key, images, prev_tag)
     curr_release = build_release(registry, cosign_key, images, curr_tag)
@@ -647,6 +756,7 @@ def build_release_data(
         "common-packages": common_packages(curr_release),
         "diff": diff,
         "commits": commits,
+        "commit-repo-url": resolve_commit_repo_url(commit_repo),
         "website": website,
     }
 
@@ -727,6 +837,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Image names to compare (e.g. yellowfin albacore). Overrides the family default.",
     )
     parser.add_argument(
+        "--commit-repo",
+        metavar="OWNER/REPO_OR_URL",
+        help=(
+            "Repository the '## Commits' section links to, as 'owner/repo' or a full "
+            "https URL. Defaults to the GITHUB_REPOSITORY Actions sets for the checked-out "
+            "repo, then to a legacy ublue-os/bluefin fallback if neither is available."
+        ),
+    )
+    parser.add_argument(
         "--output",
         "-o",
         metavar="FILE",
@@ -766,13 +885,17 @@ def main():
     if args.images and len(args.images) == 1 and " " in args.images[0]:
         args.images = args.images[0].split()
 
-    # Validate: need either a known family, or explicit registry+cosign-key
-    using_explicit = args.registry and args.cosign_key
-    using_family = args.family is not None
-    if not using_explicit and not using_family:
-        log.error(
-            "Either --family (e.g. bluefin) OR both --registry and --cosign-key must be provided."
+    # Validate up front, through the same resolver the work later uses, so bad
+    # input exits cleanly here instead of raising a traceback mid-run.
+    try:
+        resolve_target(
+            family=args.family,
+            registry=args.registry,
+            cosign_key=args.cosign_key,
+            images=args.images,
         )
+    except TargetConfigError as err:
+        log.error(str(err))
         sys.exit(1)
 
     # Discover or validate tags
@@ -806,6 +929,7 @@ def main():
         images=args.images,
         registry=args.registry,
         cosign_key=args.cosign_key,
+        commit_repo=args.commit_repo,
     )
 
     if args.json:
