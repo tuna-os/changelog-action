@@ -526,7 +526,7 @@ def infer_variant_label(tag: str) -> str:
     return VARIANT_LABELS.get(prefix, f"{prefix.upper()} Release")
 
 
-def render_changelog(data: dict, handwritten: str = "") -> str:
+def render_changelog(data: dict, handwritten: str = "", repo_url: str | None = None) -> str:
     prev_tag = data["prev-tag"]
     curr_tag = data["curr-tag"]
     variant_label = infer_variant_label(curr_tag)
@@ -581,8 +581,13 @@ def render_changelog(data: dict, handwritten: str = "") -> str:
         lines.append("| --- | --- | --- |")
         for commit in commits:
             short_hash = commit["hash"][:7]
+            hash_cell = (
+                f"[{short_hash}]({repo_url}/commit/{commit['hash']})"
+                if repo_url
+                else short_hash
+            )
             lines.append(
-                f"| 🔹 **[{short_hash}](https://github.com/ublue-os/bluefin/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
+                f"| 🔹 **{hash_cell}** | {commit['subject']} | {commit['author']} |"
             )
         lines.append("")
 
@@ -742,6 +747,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional handwritten text to include at the top of the changelog",
     )
     parser.add_argument(
+        "--repo-url",
+        metavar="URL",
+        help=(
+            "Base repo URL (e.g. https://github.com/ublue-os/bluefin) used to link "
+            "commit hashes in the changelog. Omit to render plain hashes with no link."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output raw JSON instead of Markdown",
@@ -813,7 +826,9 @@ def main():
             json.dump(release_data, f, indent=2)
         log.info(f"✅ JSON written to {out_file}")
     else:
-        rendered_md = render_changelog(release_data, handwritten=args.handwritten)
+        rendered_md = render_changelog(
+            release_data, handwritten=args.handwritten, repo_url=args.repo_url
+        )
         with open(out_file, "w") as f:
             f.write(rendered_md)
         log.info(f"✅ Markdown written to {out_file}")

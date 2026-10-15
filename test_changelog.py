@@ -373,7 +373,11 @@ class TestRenderChangelog:
                 {"hash": "abcdef1234567890", "subject": "Fix it", "author": "Alice"},
             ],
         }
-        md = _mod.render_changelog(data, handwritten="Handwritten note.")
+        md = _mod.render_changelog(
+            data,
+            handwritten="Handwritten note.",
+            repo_url="https://github.com/ublue-os/bluefin",
+        )
         assert "# 🦕 stable-20250102: Stable Release" in md
         assert "Handwritten note." in md
         assert "## 📦 bluefin Packages" in md
@@ -384,6 +388,19 @@ class TestRenderChangelog:
         assert "abcdef1" in md
         assert "https://github.com/ublue-os/bluefin/commit/abcdef1234567890" in md
         assert "| Fix it | Alice |" in md
+
+    def test_commit_hash_unlinked_without_repo_url(self):
+        data = {
+            "prev-tag": "stable-20250101",
+            "curr-tag": "stable-20250102",
+            "diff": {},
+            "commits": [
+                {"hash": "abcdef1234567890", "subject": "Fix it", "author": "Alice"},
+            ],
+        }
+        md = _mod.render_changelog(data)
+        assert "abcdef1" in md
+        assert "github.com" not in md
 
     def test_no_sections_when_empty(self):
         md = _mod.render_changelog({"prev-tag": "a", "curr-tag": "b", "diff": {}})

@@ -29,6 +29,9 @@ inputs:
   handwritten:
     description: 'Optional introductory text for the changelog'
     required: false
+  repo-url:
+    description: 'Base repo URL (e.g. https://github.com/ublue-os/bluefin) used to link commit hashes. Omitted links render as plain hashes.'
+    required: false
   output:
     description: 'Output file path'
     required: false
@@ -63,6 +66,8 @@ runs:
     - ${{ inputs.tag-pattern }}
     - ${{ inputs.handwritten && '--handwritten' || '' }}
     - ${{ inputs.handwritten }}
+    - ${{ inputs.repo-url && '--repo-url' || '' }}
+    - ${{ inputs.repo-url }}
     - --output
     - ${{ inputs.output }}
     - ${{ inputs.output-env && '--output-env' || '' }}
