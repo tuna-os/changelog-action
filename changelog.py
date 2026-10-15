@@ -662,14 +662,19 @@ def normalize_argv(argv: list[str]) -> list[str]:
     action.yml builds a fixed-width `args` list in which every optional input
     contributes a slot whether or not it was set, so a Docker invocation that
     sets only `stream` still hands the entrypoint roughly a dozen empty-string
-    arguments. argparse would reject them: only two positionals are declared.
+    arguments.  argparse would reject them: only two positionals are declared.
 
-    The filter is content-based rather than position-based, which is why it is
-    named and testable here instead of buried in main(): it cannot distinguish
-    padding from a flag value that happens to be empty or the literal string
-    "false", and any change to action.yml's input list changes what it strips.
+    Each optional input occupies exactly ONE slot, emitted as a self-describing
+    `--flag=value` token, so an unset input is an empty string and nothing else
+    is.  Dropping empty slots can therefore never separate a flag from its
+    value, and a value is never inspected to decide whether it is padding --
+    `handwritten: "false"` and `prev_tag: "false"` reach argparse intact.
+
+    Keep that invariant when adding an input to action.yml: one slot, one
+    token, `--flag=value`.  A flag and its value in two slots reintroduces the
+    desync this form exists to prevent.
     """
-    return [arg for arg in argv if arg.strip() and arg.strip() != "false"]
+    return [arg for arg in argv if arg.strip()]
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

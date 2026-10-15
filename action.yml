@@ -49,24 +49,15 @@ runs:
   using: 'docker'
   image: 'Dockerfile'
   args:
-    - ${{ inputs.family && '--family' || '' }}
-    - ${{ inputs.family }}
-    - ${{ inputs.registry && '--registry' || '' }}
-    - ${{ inputs.registry }}
-    - ${{ inputs.cosign-key && '--cosign-key' || '' }}
-    - ${{ inputs.cosign-key }}
-    - ${{ inputs.images && '--images' || '' }}
-    - ${{ inputs.images }}
-    - ${{ inputs.stream && '--stream' || '' }}
-    - ${{ inputs.stream }}
-    - ${{ inputs.tag-pattern && '--tag-pattern' || '' }}
-    - ${{ inputs.tag-pattern }}
-    - ${{ inputs.handwritten && '--handwritten' || '' }}
-    - ${{ inputs.handwritten }}
-    - --output
-    - ${{ inputs.output }}
-    - ${{ inputs.output-env && '--output-env' || '' }}
-    - ${{ inputs.output-env }}
+    - ${{ inputs.family && format('--family={0}', inputs.family) || '' }}
+    - ${{ inputs.registry && format('--registry={0}', inputs.registry) || '' }}
+    - ${{ inputs.cosign-key && format('--cosign-key={0}', inputs.cosign-key) || '' }}
+    - ${{ inputs.images && format('--images={0}', inputs.images) || '' }}
+    - ${{ inputs.stream && format('--stream={0}', inputs.stream) || '' }}
+    - ${{ inputs.tag-pattern && format('--tag-pattern={0}', inputs.tag-pattern) || '' }}
+    - ${{ inputs.handwritten && format('--handwritten={0}', inputs.handwritten) || '' }}
+    - --output=${{ inputs.output }}
+    - ${{ inputs.output-env && format('--output-env={0}', inputs.output-env) || '' }}
     - ${{ inputs.json == 'true' && '--json' || '' }}
     - ${{ inputs.verbose == 'true' && '--verbose' || '' }}
     - ${{ !inputs.stream && inputs.prev_tag || '' }}

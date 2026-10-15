@@ -452,11 +452,12 @@ class TestFeatured:
 def _action_argv(**inputs):
     """Reproduce the argv action.yml emits for the given set of inputs.
 
-    Mirrors runs.args one slot per line, including the empty strings GitHub
-    substitutes for unset inputs.
+    Mirrors runs.args one slot per line: every optional input is a single
+    `--flag=value` token, or the empty string GitHub substitutes when the
+    input is unset.
     """
     def flag(name, value):
-        return [f"--{name}", value] if value else ["", ""]
+        return [f"--{name}={value}"] if value else [""]
 
     stream = inputs.get("stream", "")
     return [
@@ -467,7 +468,7 @@ def _action_argv(**inputs):
         *flag("stream", stream),
         *flag("tag-pattern", inputs.get("tag-pattern", "")),
         *flag("handwritten", inputs.get("handwritten", "")),
-        "--output", inputs.get("output", "changelog.md"),
+        "--output=" + inputs.get("output", "changelog.md"),
         *flag("output-env", inputs.get("output-env", "")),
         "--json" if inputs.get("json") == "true" else "",
         "--verbose" if inputs.get("verbose") == "true" else "",
@@ -481,8 +482,8 @@ class TestNormalizeArgv:
         argv = _action_argv(family="bluefin", prev_tag="stable-20250101",
                             curr_tag="stable-20250201")
         assert _mod.normalize_argv(argv) == [
-            "--family", "bluefin",
-            "--output", "changelog.md",
+            "--family=bluefin",
+            "--output=changelog.md",
             "stable-20250101", "stable-20250201",
         ]
 
@@ -491,6 +492,23 @@ class TestNormalizeArgv:
         before = list(argv)
         _mod.normalize_argv(argv)
         assert argv == before
+
+    def test_keeps_a_value_that_looks_like_a_disabled_boolean(self):
+        """Padding is recognised by the empty slot, never by the value.
+
+        The earlier filter also dropped the literal string "false", so an
+        input set to that word lost its value while its flag survived;
+        argparse then bound the following slot as the value and every
+        argument after it shifted by one.
+        """
+        argv = _action_argv(family="bluefin", handwritten="false",
+                            prev_tag="false", curr_tag="stable-20250201")
+        assert _mod.normalize_argv(argv) == [
+            "--family=bluefin",
+            "--handwritten=false",
+            "--output=changelog.md",
+            "false", "stable-20250201",
+        ]
 
     def test_parse_args_leaves_sys_argv_alone(self, monkeypatch):
         """The normalizer is a pure function; parsing must not rewrite the process."""
@@ -543,3 +561,11 @@ class TestParseActionArgv:
             **{"tag-pattern": r"^\d{8}$"}, handwritten="Intro text."))
         assert args.tag_pattern == r"^\d{8}$"
         assert args.handwritten == "Intro text."
+
+    def test_literal_false_inputs_are_not_mistaken_for_padding(self):
+        args = _mod.parse_args(_action_argv(
+            family="bluefin", handwritten="false",
+            prev_tag="false", curr_tag="stable-20250201"))
+        assert args.handwritten == "false"
+        assert (args.prev_tag, args.curr_tag) == ("false", "stable-20250201")
+        assert args.output == "changelog.md"
