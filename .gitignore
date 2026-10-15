@@ -1,0 +1,8 @@
+# Python bytecode caches: build output, never source.
+__pycache__/
+*.py[cod]
+
+# pytest / coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
