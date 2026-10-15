@@ -69,12 +69,26 @@ log = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------
 
 
+class CommandError(RuntimeError):
+    """An external command (skopeo, cosign, oras, zstd, git) exited non-zero."""
+
+
+# Failures that mean "this registry, image, tag or payload did not work out":
+# a command exited non-zero (CommandError), a payload did not parse or did not
+# contain what it must (ValueError, which covers json.JSONDecodeError,
+# binascii.Error and UnicodeDecodeError), or the filesystem/network layer
+# refused (OSError). Everything else — TypeError, KeyError, AttributeError —
+# is a defect in this script, and retrying it three times or logging it as a
+# skipped payload only hides it behind a plausible-looking changelog.
+RECOVERABLE = (CommandError, ValueError, OSError)
+
+
 def run_cmd(cmd: list[str]) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode == 0:
         return result.stdout
     else:
-        raise Exception(
+        raise CommandError(
             f"Command failed\nCmd: {cmd}\nExit: {result.returncode}\nErr: {result.stderr}"
         )
 
@@ -83,7 +97,7 @@ def retry(n: int, f: Callable) -> Any:
     for attempt in range(1, n + 1):
         try:
             return f()
-        except Exception as e:
+        except RECOVERABLE as e:
             if attempt < n:
                 log.warning(
                     f"Attempt {attempt}/{n} failed: {e}. Retrying in {RETRY_WAIT_S}s…"
@@ -168,13 +182,13 @@ def fetch_sbom(registry: str, cosign_key: str, image: str, digest: str) -> dict:
 
         try:
             raw = run_cmd(cmd_stable)
-        except Exception as e_stable:
+        except RECOVERABLE as e_stable:
             log.debug(
                 f"spdxjson attestation failed: {e_stable}. Trying zstd attestation..."
             )
             try:
                 raw = run_cmd(cmd_lts)
-            except Exception as e_lts:
+            except RECOVERABLE as e_lts:
                 raise ValueError(
                     f"Failed to fetch any attestation. Stable error: {e_stable} | LTS error: {e_lts}"
                 )
@@ -210,7 +224,7 @@ def fetch_sbom(registry: str, cosign_key: str, image: str, digest: str) -> dict:
 
                 if predicate.get("artifacts") or predicate.get("packages"):
                     return predicate
-            except Exception as e:
+            except RECOVERABLE as e:
                 log.warning(f"Skipping payload that failed to decode: {e}")
                 continue
 
@@ -323,7 +337,7 @@ def fetch_packages(registry: str, cosign_key: str, image: str, tag: str) -> dict
     digest = get_digest(registry, image, tag)
     try:
         sbom = retry(RETRIES, lambda: fetch_sbom_oras(registry, image, digest))
-    except Exception as oras_err:
+    except RECOVERABLE as oras_err:
         log.debug(
             f"ORAS referrer fetch failed for {image}@{digest}: {oras_err}. "
             f"Falling back to cosign attestation..."
@@ -398,7 +412,7 @@ def fetch_commits(prev_tag: str, curr_tag: str) -> list[dict]:
         out = run_cmd(
             ["git", "log", "--pretty=format:%H;%s;%an", f"{prev_tag}..{curr_tag}"]
         )
-    except Exception as e:
+    except RECOVERABLE as e:
         log.warning(
             f"Could not fetch git commits between {prev_tag} and {curr_tag}: {e}"
         )
@@ -491,7 +505,7 @@ def discover_tags(
                 sbom_tags.append(t)
             else:
                 log.debug(f"Tag {t} has no SBOM referrer — skipping.")
-        except Exception as e:
+        except RECOVERABLE as e:
             log.debug(f"Could not check SBOM for tag {t}: {e} — skipping.")
 
     if len(sbom_tags) < 2:
