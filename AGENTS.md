@@ -44,18 +44,17 @@ ruff check .                             # config in ruff.toml
 
 > **`ruff` is configured but not enforced.** `ruff.toml` sets the rules and
 > `test.yml` runs *only* pytest, so nothing checks them and the tree has
-> drifted: `ruff check .` reports 15 findings on `master`.
+> drifted: `ruff check .` reports 7 findings on `master`.
 >
-> They are style, not defects — the only one that can indicate a real bug is
-> `F841`, an unused `cmd` variable in a test, which changes no behaviour. The
-> rest are import ordering, unused imports and long lines. (An `F811`
-> redundant `import sys` was here too and has since been fixed.)
+> They are style, not defects — 2 `EXE001` shebang bits, 2 `I001` import
+> ordering, one unused `warnings` import, one `UP035` typing import, and
+> `F841`, an unused `cmd` variable in a test, which changes no behaviour.
 
 ## External tools it shells out to
 
-`skopeo` (inspect image manifests and RPM lists) and `cosign` (verify the
-attestation). Both are external processes, so their output format is an
-implicit dependency: a change in either tool's CLI output can break parsing
+`skopeo` (inspect image manifests and RPM lists), `cosign` (verify the
+attestation), plus `oras`, `zstd` and `git`. All are external processes, so
+their output format is an implicit dependency: a change in either tool's CLI output can break parsing
 without anything in this repo changing. The tests stub these rather than
 hitting a registry, which is what makes the suite fast and offline — keep new
 tests that way.
@@ -67,3 +66,19 @@ tests that way.
 **ignored when `stream` is set**. That precedence is easy to invert by
 accident, and a workflow that silently compares the wrong pair produces a
 changelog that looks plausible and is wrong — which is worse than an error.
+
+## Error classification: `CommandError` and `RECOVERABLE`
+
+`run_cmd` raises `CommandError` (a `RuntimeError`) when a shelled-out tool
+exits non-zero. `RECOVERABLE = (CommandError, ValueError, OSError)` is the one
+place that defines "this registry, image, tag or payload did not work out":
+`retry`, the cosign stable-then-zstd fallback, the ORAS-then-cosign fallback,
+the per-payload decode loop, `fetch_commits` and the tag-discovery SBOM probe
+all catch that tuple and nothing wider.
+
+Catch `Exception` nowhere in the release path. A `TypeError`, `KeyError` or
+`AttributeError` is a defect in this file, and swallowing it as a skipped
+payload or retrying it three times produces a changelog that looks plausible
+and is missing packages — the same failure mode the tag-precedence note above
+warns about. New fetch or parse code either raises one of the `RECOVERABLE`
+types or lets the defect out.

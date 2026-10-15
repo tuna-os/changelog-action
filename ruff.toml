@@ -6,11 +6,12 @@
 target-version = "py311"
 line-length = 100
 
-# NOT yet wired into CI as a blocking gate. `ruff check` currently reports 18
-# pre-existing findings on this tree — 6 BLE001 blind-except, 3 F401, 2 EXE001,
-# 2 I001, and one each of UP035, TRY002, F811, PLW1510, F841. Seven are
-# auto-fixable; the rest touch exception handling in the release path and want
-# their own reviewed change, not a drive-by fix inside a config commit.
+# NOT yet wired into CI as a blocking gate. `ruff check` reports 7 remaining
+# findings on this tree — 2 EXE001, 2 I001, and one each of F401, UP035, F841.
+# All are mechanical (shebang bits, import order, unused names); 4 are
+# auto-fixable. The exception-handling findings (TRY002, PLW1510 and the 6
+# BLE001 blind-excepts) are gone: run_cmd now raises CommandError and the
+# release path catches the RECOVERABLE tuple instead of bare Exception.
 #
 # Adding the job with `|| true` was considered and rejected: this org already
 # learned that lesson the hard way (gtk-office-suite PR #86 shipped three

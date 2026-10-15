@@ -139,7 +139,7 @@ class TestFetchCommits:
 
     def test_git_failure_is_empty_list(self, monkeypatch):
         def boom(cmd):
-            raise RuntimeError("git not available")
+            raise _mod.CommandError("git not available")
 
         monkeypatch.setattr(_mod, "run_cmd", boom)
         assert _mod.fetch_commits("v1", "v2") == []
@@ -170,6 +170,17 @@ class TestRetry:
         with pytest.raises(ValueError, match="nope"):
             _mod.retry(2, always_fails)
         assert len(calls) == 2  # no retry past the limit
+
+    def test_programming_error_is_not_retried(self):
+        calls = []
+
+        def broken():
+            calls.append(1)
+            raise TypeError("bad call in this script, not a flaky registry")
+
+        with pytest.raises(TypeError):
+            _mod.retry(3, broken)
+        assert len(calls) == 1  # fail fast: a defect here is not transient
 
 
 class TestExtractPayloads:
@@ -229,7 +240,7 @@ class TestRegistryRetrieval:
         def fake_run(cmd):
             calls.append(cmd)
             if "spdxjson" in cmd:
-                raise RuntimeError("missing stable attestation")
+                raise _mod.CommandError("missing stable attestation")
             return json.dumps({"payload": payload})
 
         monkeypatch.setattr(_mod, "run_cmd", fake_run)
