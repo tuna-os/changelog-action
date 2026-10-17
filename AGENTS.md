@@ -33,8 +33,9 @@ Two facts make that sharper than usual:
 | Path | What |
 |---|---|
 | `action.yml` | the input contract |
-| `changelog.py` | the implementation (~750 lines) |
-| `test_changelog.py` | the suite — 50 tests |
+| `changelog.py` | registry/SBOM I/O, diffing, assembly, and CLI |
+| `presentation.py` | pure release-data projections and Markdown rendering |
+| `test_changelog.py` | the suite — 66 tests |
 | `Dockerfile` | the action's runtime |
 
 ```bash

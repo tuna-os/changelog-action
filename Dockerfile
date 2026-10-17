@@ -42,6 +42,7 @@ RUN set -eux; \
     rm -f oras "oras_${ORAS_VERSION}_linux_amd64.tar.gz" "oras_${ORAS_VERSION}_checksums.txt"
 
 COPY changelog.py /changelog.py
+COPY presentation.py /presentation.py
 RUN chmod +x /changelog.py
 
 ENTRYPOINT ["/changelog.py"]

@@ -21,11 +21,14 @@ _SCRIPT = Path(__file__).resolve().parent / "changelog.py"
 _spec = importlib.util.spec_from_file_location("changelog", _SCRIPT)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
+_presentation = sys.modules["presentation"]
 
 
 def test_action_runs_the_pinned_repository_source():
     """The selected action ref, not an external mutable image, defines runtime."""
     metadata = (_SCRIPT.parent / "action.yml").read_text()
+    dockerfile = (_SCRIPT.parent / "Dockerfile").read_text()
+    assert "COPY presentation.py /presentation.py" in dockerfile
     assert "image: 'Dockerfile'" in metadata
     assert "docker://" not in metadata
     assert "ghcr.io/hanthor" not in metadata
@@ -357,13 +360,13 @@ class TestReleaseAssembly:
 
 class TestInferVariantLabel:
     def test_known_variants(self):
-        assert _mod.infer_variant_label("stable-20250101") == "Stable Release"
-        assert _mod.infer_variant_label("lts-20250101") == "LTS Release"
-        assert _mod.infer_variant_label("gts-20250101") == "GTS Release"
-        assert _mod.infer_variant_label("beta-20250101") == "Beta Release"
+        assert _presentation.infer_variant_label("stable-20250101") == "Stable Release"
+        assert _presentation.infer_variant_label("lts-20250101") == "LTS Release"
+        assert _presentation.infer_variant_label("gts-20250101") == "GTS Release"
+        assert _presentation.infer_variant_label("beta-20250101") == "Beta Release"
 
     def test_unknown_variant_upper_prefix(self):
-        assert _mod.infer_variant_label("test-20250101") == "TEST Release"
+        assert _presentation.infer_variant_label("test-20250101") == "TEST Release"
 
 
 # ── render_changelog ─────────────────────────────────────────────────────────
@@ -384,7 +387,7 @@ class TestRenderChangelog:
                 {"hash": "abcdef1234567890", "subject": "Fix it", "author": "Alice"},
             ],
         }
-        md = _mod.render_changelog(data, handwritten="Handwritten note.")
+        md = _presentation.render_changelog(data, handwritten="Handwritten note.")
         assert "# 🦕 stable-20250102: Stable Release" in md
         assert "Handwritten note." in md
         assert "## 📦 bluefin Packages" in md
@@ -397,7 +400,7 @@ class TestRenderChangelog:
         assert "| Fix it | Alice |" in md
 
     def test_no_sections_when_empty(self):
-        md = _mod.render_changelog({"prev-tag": "a", "curr-tag": "b", "diff": {}})
+        md = _presentation.render_changelog({"prev-tag": "a", "curr-tag": "b", "diff": {}})
         assert "# 🦕 b: B Release" in md
         assert "### ✨ Added" not in md
         assert "## 📜 Commits" not in md
@@ -414,7 +417,7 @@ class TestRenderChangelog:
             "commits": [{"hash": "deadbeef00", "subject": "Fix it", "author": "Alice"}],
             "commit-repo-url": "https://github.com/tuna-os/docs",
         }
-        md = _mod.render_changelog(data)
+        md = _presentation.render_changelog(data)
         assert "https://github.com/tuna-os/docs/commit/deadbeef00" in md
         assert "ublue-os/bluefin" not in md
 
@@ -495,10 +498,10 @@ class TestDiscoverTags:
 class TestFeatured:
     def test_extract_featured_and_website_data(self):
         packages = {"bash": "5.2", "coreutils": "9.4", "other": "1"}
-        featured = _mod.extract_featured(packages)
+        featured = _presentation.extract_featured(packages)
         # Only keys that exist in packages are reported.
         assert set(featured) <= set(packages)
-        data = _mod.build_website_data({"img": {"packages": packages}})
+        data = _presentation.build_website_data({"img": {"packages": packages}})
         assert set(data["img"]["featured"]) == set(featured)
 
 
