@@ -12,6 +12,13 @@ import logging
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Any
+from presentation import (
+    DEFAULT_COMMIT_REPO_URL,
+    build_website_data,
+    extract_featured,
+    infer_variant_label,
+    render_changelog,
+)
 
 # ----------------------------------------------------------------------------
 # Configuration
@@ -40,38 +47,9 @@ IMAGE_CONFIGS = {
     },
 }
 
-FEATURED_PACKAGES = {
-    "kernel": "kernel",
-    "gnome": "gnome-shell",
-    "mesa": "mesa",
-    "podman": "podman",
-    "nvidia": "akmod-nvidia",
-    "docker": "docker",
-    "systemd": "systemd",
-    "bootc": "bootc",
-}
-
-# Release variant labels for the changelog heading
-VARIANT_LABELS = {
-    "stable": "Stable Release",
-    "lts": "LTS Release",
-    "gts": "GTS Release",
-    "beta": "Beta Release",
-}
 
 RETRIES = 3
 RETRY_WAIT_S = 2.0
-
-# Legacy fallback for commit links when neither --commit-repo nor the
-# GITHUB_REPOSITORY environment variable (set automatically by GitHub Actions
-# for the checked-out repo) is available. `fetch_commits` runs `git log`
-# against whatever repo the action's checkout is in — that is almost always
-# GITHUB_REPOSITORY, not this literal fallback. Keeping the old ublue-os/bluefin
-# value here rather than an empty string only avoids changing rendered output
-# for anyone invoking changelog.py completely outside GitHub Actions with
-# neither GITHUB_REPOSITORY set nor --commit-repo passed.
-DEFAULT_COMMIT_REPO_URL = "https://github.com/ublue-os/bluefin"
-
 
 def resolve_commit_repo_url(commit_repo: str | None) -> str:
     """Resolve the base URL used for commit links in the rendered changelog.
@@ -622,106 +600,6 @@ def discover_tags(
     log.info(f"Discovered tags: prev={prev}, curr={curr}")
     return prev, curr
 
-
-# ----------------------------------------------------------------------------
-# Markdown Generation
-# ----------------------------------------------------------------------------
-
-
-def infer_variant_label(tag: str) -> str:
-    """
-    Derive a human-readable release label from the tag, e.g.:
-      'stable-20250101' -> 'Stable Release'
-      'lts-20250101'    -> 'LTS Release'
-      'gts-20250101'    -> 'GTS Release'
-    Falls back to the raw tag if no known variant prefix is matched.
-    """
-    prefix = tag.split("-")[0].lower()
-    return VARIANT_LABELS.get(prefix, f"{prefix.upper()} Release")
-
-
-def render_changelog(data: dict, handwritten: str = "") -> str:
-    prev_tag = data["prev-tag"]
-    curr_tag = data["curr-tag"]
-    variant_label = infer_variant_label(curr_tag)
-
-    lines = [f"# 🦕 {curr_tag}: {variant_label}", ""]
-
-    if handwritten:
-        lines.append(handwritten)
-        lines.append("")
-
-    lines.extend(
-        [
-            f"This is an automatically generated changelog for release `{curr_tag}`.",
-            "",
-            f"From previous version `{prev_tag}` there have been the following changes. **Only packages that actually changed are shown.**",
-            "",
-        ]
-    )
-
-    for img, pkg_diff in data["diff"].items():
-        lines.append(f"## 📦 {img} Packages")
-        lines.append("")
-
-        if pkg_diff.get("added"):
-            lines.append("### ✨ Added")
-            lines.append("| Package | Version |")
-            lines.append("| --- | --- |")
-            for name, version in pkg_diff["added"].items():
-                lines.append(f"| {name} | {version} |")
-            lines.append("")
-
-        if pkg_diff.get("removed"):
-            lines.append("### ❌ Removed")
-            lines.append("| Package | Version |")
-            lines.append("| --- | --- |")
-            for name, version in pkg_diff["removed"].items():
-                lines.append(f"| {name} | {version} |")
-            lines.append("")
-
-        if pkg_diff.get("changed"):
-            lines.append("### 🔄 Changed")
-            lines.append("| Package | Version |")
-            lines.append("| --- | --- |")
-            for name, changes in pkg_diff["changed"].items():
-                lines.append(f"| {name} | {changes['from']} ➡️ {changes['to']} |")
-            lines.append("")
-
-    commits = data.get("commits", [])
-    if commits:
-        repo_url = data.get("commit-repo-url") or DEFAULT_COMMIT_REPO_URL
-        lines.append("## 📜 Commits")
-        lines.append("| Hash | Subject | Author |")
-        lines.append("| --- | --- | --- |")
-        for commit in commits:
-            short_hash = commit["hash"][:7]
-            lines.append(
-                f"| 🔹 **[{short_hash}]({repo_url}/commit/{commit['hash']})** | {commit['subject']} | {commit['author']} |"
-            )
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-# ----------------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------------
-
-
-def extract_featured(packages: dict) -> dict:
-    featured = {}
-    for label, pkg_name in FEATURED_PACKAGES.items():
-        if pkg_name in packages:
-            featured[label] = packages[pkg_name]
-    return featured
-
-
-def build_website_data(curr_release: dict) -> dict:
-    return {
-        img: {"featured": extract_featured(data["packages"])}
-        for img, data in curr_release.items()
-    }
 
 
 def build_release_data(
