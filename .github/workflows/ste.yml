@@ -38,6 +38,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions: {}
+
 jobs:
   ste:
-    uses: tuna-os/.github/.github/workflows/ste-lint.yml@main
+    permissions:
+      contents: read
+    uses: tuna-os/.github/.github/workflows/ste-lint.yml@4078f531ac74703f203bde835ef6c25e9321b97b # main # zizmor: ignore[ref-version-mismatch] pinned to a reviewed main commit; Renovate bumps the digest, so main may be ahead
